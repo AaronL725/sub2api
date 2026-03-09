@@ -63,7 +63,7 @@ type AnthropicContentBlock struct {
 
 // AnthropicImageSource describes the source data for an image content block.
 type AnthropicImageSource struct {
-	Type      string `json:"type"`       // "base64"
+	Type      string `json:"type"` // "base64"
 	MediaType string `json:"media_type"`
 	Data      string `json:"data"`
 }

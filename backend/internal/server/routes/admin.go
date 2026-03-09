@@ -290,7 +290,6 @@ func registerCodexRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-
 func registerAnnouncementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	announcements := admin.Group("/announcements")
 	{
