@@ -7,6 +7,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Toast, ToastType, PublicSettings } from '@/types'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
+import { checkUpdates } from '@/api/admin/system'
+import type { ReleaseInfo } from '@/api/admin/system'
 
 export const useAppStore = defineStore('app', () => {
   // ==================== State ====================
@@ -15,6 +17,15 @@ export const useAppStore = defineStore('app', () => {
   const mobileOpen = ref<boolean>(false)
   const loading = ref<boolean>(false)
   const toasts = ref<Toast[]>([])
+
+  // Version check state
+  const versionLoading = ref<boolean>(false)
+  const currentVersion = ref<string>('')
+  const latestVersion = ref<string>('')
+  const hasUpdate = ref<boolean>(false)
+  const releaseInfo = ref<ReleaseInfo | null>(null)
+  const buildType = ref<string>('')
+  const versionCacheExpiry = ref<number>(0)
 
   // Public settings cache state
   const publicSettingsLoaded = ref<boolean>(false)
@@ -297,6 +308,30 @@ export const useAppStore = defineStore('app', () => {
     cachedPublicSettings.value = null
   }
 
+  async function fetchVersion(force = false): Promise<void> {
+    const now = Date.now()
+    if (!force && now < versionCacheExpiry.value) return
+    if (versionLoading.value) return
+    versionLoading.value = true
+    try {
+      const info = await checkUpdates(force)
+      currentVersion.value = info.current_version
+      latestVersion.value = info.latest_version
+      hasUpdate.value = info.has_update
+      releaseInfo.value = info.release_info ?? null
+      buildType.value = info.build_type
+      versionCacheExpiry.value = now + 5 * 60 * 1000
+    } catch (error) {
+      console.error('Failed to fetch version info:', error)
+    } finally {
+      versionLoading.value = false
+    }
+  }
+
+  function clearVersionCache(): void {
+    versionCacheExpiry.value = 0
+  }
+
   /**
    * Initialize settings from injected config (window.__APP_CONFIG__)
    * This is called synchronously before Vue app mounts to prevent flash
@@ -352,6 +387,16 @@ export const useAppStore = defineStore('app', () => {
     // Public settings actions
     fetchPublicSettings,
     clearPublicSettingsCache,
-    initFromInjectedConfig
+    initFromInjectedConfig,
+
+    // Version state & actions
+    versionLoading,
+    currentVersion,
+    latestVersion,
+    hasUpdate,
+    releaseInfo,
+    buildType,
+    fetchVersion,
+    clearVersionCache
   }
 })
