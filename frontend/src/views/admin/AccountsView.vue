@@ -131,8 +131,8 @@
         </div>
       </template>
       <template #table>
-        <AccountBulkActionsBar :selected-ids="selIds" @delete="handleBulkDelete" @edit="showBulkEdit = true" @clear="clearSelection" @select-page="selectPage" @toggle-schedulable="handleBulkToggleSchedulable" />
-        <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <AccountBulkActionsBar :selected-ids="selIds" @delete="handleBulkDelete" @edit="showBulkEdit = true" @clear="selIds = []" @select-page="selectPage" @toggle-schedulable="handleBulkToggleSchedulable" />
+        <div ref="accountTableRef">
         <DataTable
           :columns="cols"
           :data="accounts"
@@ -263,7 +263,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @reset-status="handleResetStatus" @clear-rate-limit="handleClearRateLimit" @reset-quota="handleResetQuota" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal :show="showBulkEdit" :account-ids="selIds" :selected-platforms="selPlatforms" :selected-types="selTypes" :proxies="proxies" :groups="groups" @close="showBulkEdit = false" @updated="handleBulkUpdated" />
@@ -288,7 +288,6 @@ import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect } from '@/composables/useSwipeSelect'
-import { useTableSelection } from '@/composables/useTableSelection'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -323,11 +322,17 @@ const authStore = useAuthStore()
 
 const proxies = ref<Proxy[]>([])
 const groups = ref<AdminGroup[]>([])
+const selIds = ref<number[]>([])
 const accountTableRef = ref<HTMLElement | null>(null)
+useSwipeSelect(accountTableRef, {
+  isSelected: (id) => selIds.value.includes(id),
+  select: (id) => { if (!selIds.value.includes(id)) selIds.value.push(id) },
+  deselect: (id) => { selIds.value = selIds.value.filter(x => x !== id) }
+})
 const selPlatforms = computed<AccountPlatform[]>(() => {
   const platforms = new Set(
     accounts.value
-      .filter(a => isSelected(a.id))
+      .filter(a => selIds.value.includes(a.id))
       .map(a => a.platform)
   )
   return [...platforms]
@@ -335,7 +340,7 @@ const selPlatforms = computed<AccountPlatform[]>(() => {
 const selTypes = computed<AccountType[]>(() => {
   const types = new Set(
     accounts.value
-      .filter(a => isSelected(a.id))
+      .filter(a => selIds.value.includes(a.id))
       .map(a => a.type)
   )
   return [...types]
@@ -560,29 +565,6 @@ const {
   initialParams: { platform: '', type: '', status: '', group: '', search: '' }
 })
 
-const {
-  selectedIds: selIds,
-  allVisibleSelected,
-  isSelected,
-  setSelectedIds,
-  select,
-  deselect,
-  toggle: toggleSel,
-  clear: clearSelection,
-  removeMany: removeSelectedAccounts,
-  toggleVisible,
-  selectVisible: selectPage
-} = useTableSelection<Account>({
-  rows: accounts,
-  getId: (account) => account.id
-})
-
-useSwipeSelect(accountTableRef, {
-  isSelected,
-  select,
-  deselect
-})
-
 const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
 }
@@ -590,17 +572,16 @@ const resetAutoRefreshCache = () => {
 const isFirstLoad = ref(true)
 
 const load = async () => {
-  const requestParams = params as any
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
   if (isFirstLoad.value) {
-    requestParams.lite = '1'
+    ;(params as any).lite = '1'
   }
   await baseLoad()
   if (isFirstLoad.value) {
     isFirstLoad.value = false
-    delete requestParams.lite
+    delete (params as any).lite
   }
   await refreshTodayStatsBatch()
 }
@@ -884,11 +865,24 @@ const openMenu = (a: Account, e: MouseEvent) => {
 
   menu.show = true
 }
+const toggleSel = (id: number) => { const i = selIds.value.indexOf(id); if(i === -1) selIds.value.push(id); else selIds.value.splice(i, 1) }
+const allVisibleSelected = computed(() => {
+  if (accounts.value.length === 0) return false
+  return accounts.value.every(account => selIds.value.includes(account.id))
+})
 const toggleSelectAllVisible = (event: Event) => {
   const target = event.target as HTMLInputElement
-  toggleVisible(target.checked)
+  if (target.checked) {
+    const next = new Set(selIds.value)
+    accounts.value.forEach(account => next.add(account.id))
+    selIds.value = Array.from(next)
+    return
+  }
+  const visibleIds = new Set(accounts.value.map(account => account.id))
+  selIds.value = selIds.value.filter(id => !visibleIds.has(id))
 }
-const handleBulkDelete = async () => { if(!confirm(t('common.confirm'))) return; try { await Promise.all(selIds.value.map(id => adminAPI.accounts.delete(id))); clearSelection(); reload() } catch (error) { console.error('Failed to bulk delete accounts:', error) } }
+const selectPage = () => { selIds.value = [...new Set([...selIds.value, ...accounts.value.map(a => a.id)])] }
+const handleBulkDelete = async () => { if(!confirm(t('common.confirm'))) return; try { await Promise.all(selIds.value.map(id => adminAPI.accounts.delete(id))); selIds.value = []; reload() } catch (error) { console.error('Failed to bulk delete accounts:', error) } }
 const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
   if (accountIds.length === 0) return
   const idSet = new Set(accountIds)
@@ -961,7 +955,7 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
     const { successIds, failedIds, successCount, failedCount, hasIds, hasCounts } = normalizeBulkSchedulableResult(result, accountIds)
     if (!hasIds && !hasCounts) {
       appStore.showError(t('admin.accounts.bulkSchedulableResultUnknown'))
-      setSelectedIds(accountIds)
+      selIds.value = accountIds
       load().catch((error) => {
         console.error('Failed to refresh accounts:', error)
       })
@@ -981,17 +975,16 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
         ? t('admin.accounts.bulkSchedulablePartial', { success: successCount, failed: failedCount })
         : t('admin.accounts.bulkSchedulableResultUnknown')
       appStore.showError(message)
-      setSelectedIds(failedIds.length > 0 ? failedIds : accountIds)
+      selIds.value = failedIds.length > 0 ? failedIds : accountIds
     } else {
-      if (hasIds) clearSelection()
-      else setSelectedIds(accountIds)
+      selIds.value = hasIds ? [] : accountIds
     }
   } catch (error) {
     console.error('Failed to bulk toggle schedulable:', error)
     appStore.showError(t('common.error'))
   }
 }
-const handleBulkUpdated = () => { showBulkEdit.value = false; clearSelection(); reload() }
+const handleBulkUpdated = () => { showBulkEdit.value = false; selIds.value = []; reload() }
 const handleDataImported = () => { showImportData.value = false; reload() }
 const accountMatchesCurrentFilters = (account: Account) => {
   if (params.platform && account.platform !== params.platform) return false
@@ -1037,7 +1030,7 @@ const patchAccountInList = (updatedAccount: Account) => {
   if (!accountMatchesCurrentFilters(mergedAccount)) {
     accounts.value = accounts.value.filter(account => account.id !== mergedAccount.id)
     syncPaginationAfterLocalRemoval()
-    removeSelectedAccounts([mergedAccount.id])
+    selIds.value = selIds.value.filter(id => id !== mergedAccount.id)
     if (menu.acc?.id === mergedAccount.id) {
       menu.show = false
       menu.acc = null
@@ -1123,15 +1116,24 @@ const handleRefresh = async (a: Account) => {
     console.error('Failed to refresh credentials:', error)
   }
 }
-const handleRecoverState = async (a: Account) => {
+const handleResetStatus = async (a: Account) => {
   try {
-    const updated = await adminAPI.accounts.recoverState(a.id)
+    const updated = await adminAPI.accounts.clearError(a.id)
     patchAccountInList(updated)
     enterAutoRefreshSilentWindow()
-    appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
-  } catch (error: any) {
-    console.error('Failed to recover account state:', error)
-    appStore.showError(error?.message || t('admin.accounts.recoverStateFailed'))
+    appStore.showSuccess(t('common.success'))
+  } catch (error) {
+    console.error('Failed to reset status:', error)
+  }
+}
+const handleClearRateLimit = async (a: Account) => {
+  try {
+    const updated = await adminAPI.accounts.clearRateLimit(a.id)
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+    appStore.showSuccess(t('common.success'))
+  } catch (error) {
+    console.error('Failed to clear rate limit:', error)
   }
 }
 const handleResetQuota = async (a: Account) => {
@@ -1161,11 +1163,17 @@ const handleToggleSchedulable = async (a: Account) => {
   }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
-const handleTempUnschedReset = async (updated: Account) => {
-  showTempUnsched.value = false
-  tempUnschedAcc.value = null
-  patchAccountInList(updated)
-  enterAutoRefreshSilentWindow()
+const handleTempUnschedReset = async () => {
+  if(!tempUnschedAcc.value) return
+  try {
+    const updated = await adminAPI.accounts.clearError(tempUnschedAcc.value.id)
+    showTempUnsched.value = false
+    tempUnschedAcc.value = null
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+  } catch (error) {
+    console.error('Failed to reset temp unscheduled:', error)
+  }
 }
 const formatExpiresAt = (value: number | null) => {
   if (!value) return '-'

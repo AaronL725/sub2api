@@ -24,7 +24,10 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: weishaw/sub2api:latest
+    image: sub2api:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
     container_name: sub2api
     restart: unless-stopped
     ulimits:
@@ -146,6 +149,7 @@ services:
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+
     depends_on:
       postgres:
         condition: service_healthy
@@ -159,6 +163,31 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  codex-register:
+    image: codex-register:local
+    build:
+      context: ../..
+      dockerfile: sub2api/tools/codex_register/Dockerfile
+    container_name: sub2api-codex-register
+    restart: unless-stopped
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-sub2api}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_DB=${POSTGRES_DB:-sub2api}
+      - CODEX_PROXY=${CODEX_PROXY:-}
+      - CODEX_SLEEP_MIN=${CODEX_SLEEP_MIN:-5}
+      - CODEX_SLEEP_MAX=${CODEX_SLEEP_MAX:-30}
+      - CODEX_GROUP_IDS=${CODEX_GROUP_IDS:-}
+      - CODEX_MODEL_MAPPING_JSON=${CODEX_MODEL_MAPPING_JSON:-}
+      - TZ=${TZ:-Asia/Shanghai}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sub2api-network
 
   # ===========================================================================
   # PostgreSQL Database
@@ -183,7 +212,11 @@ services:
     networks:
       - sub2api-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-sub2api} -d ${POSTGRES_DB:-sub2api}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -206,12 +239,12 @@ services:
       # Local directory mapping for easy migration
       - ./redis_data:/data
     command: >
-        sh -c '
-          redis-server
-          --save 60 1
-          --appendonly yes
-          --appendfsync everysec
-          ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
+      sh -c '
+        redis-server
+        --save 60 1
+        --appendonly yes
+        --appendfsync everysec
+        ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       # REDISCLI_AUTH is used by redis-cli for authentication (safer than -a flag)

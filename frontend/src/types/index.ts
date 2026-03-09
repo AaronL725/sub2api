@@ -422,7 +422,7 @@ export interface ApiKey {
   key: string
   name: string
   group_id: number | null
-  status: 'active' | 'inactive' | 'quota_exhausted' | 'expired'
+  status: 'active' | 'inactive' | 'disabled' | 'quota_exhausted' | 'expired'
   ip_whitelist: string[]
   ip_blacklist: string[]
   last_used_at: string | null
@@ -441,9 +441,6 @@ export interface ApiKey {
   window_5h_start: string | null
   window_1d_start: string | null
   window_7d_start: string | null
-  reset_5h_at: string | null
-  reset_1d_at: string | null
-  reset_7d_at: string | null
 }
 
 export interface CreateApiKeyRequest {
@@ -462,7 +459,7 @@ export interface CreateApiKeyRequest {
 export interface UpdateApiKeyRequest {
   name?: string
   group_id?: number | null
-  status?: 'active' | 'inactive'
+  status?: 'active' | 'inactive' | 'disabled'
   ip_whitelist?: string[]
   ip_blacklist?: string[]
   quota?: number // Quota limit in USD (null = no change, 0 = unlimited)
@@ -934,7 +931,6 @@ export interface UsageLog {
   account_id: number | null
   request_id: string
   model: string
-  service_tier?: string | null
   reasoning_effort?: string | null
 
   group_id: number | null
@@ -1495,7 +1491,6 @@ export interface ScheduledTestPlan {
   cron_expression: string
   enabled: boolean
   max_results: number
-  auto_recover: boolean
   last_run_at: string | null
   next_run_at: string | null
   created_at: string
@@ -1520,7 +1515,6 @@ export interface CreateScheduledTestPlanRequest {
   cron_expression: string
   enabled?: boolean
   max_results?: number
-  auto_recover?: boolean
 }
 
 export interface UpdateScheduledTestPlanRequest {
@@ -1528,5 +1522,4 @@ export interface UpdateScheduledTestPlanRequest {
   cron_expression?: string
   enabled?: boolean
   max_results?: number
-  auto_recover?: boolean
 }

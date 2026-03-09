@@ -88,7 +88,7 @@
       </template>
 
       <template #table>
-        <div ref="proxyTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div ref="proxyTableRef">
         <DataTable :columns="columns" :data="proxies" :loading="loading">
           <template #header-select>
             <input
@@ -883,7 +883,6 @@ import Icon from '@/components/icons/Icon.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useSwipeSelect } from '@/composables/useSwipeSelect'
-import { useTableSelection } from '@/composables/useTableSelection'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -962,25 +961,12 @@ const testingProxyIds = ref<Set<number>>(new Set())
 const qualityCheckingProxyIds = ref<Set<number>>(new Set())
 const batchTesting = ref(false)
 const batchQualityChecking = ref(false)
+const selectedProxyIds = ref<Set<number>>(new Set())
 const proxyTableRef = ref<HTMLElement | null>(null)
-const {
-  selectedSet: selectedProxyIds,
-  selectedCount,
-  allVisibleSelected,
-  isSelected,
-  select,
-  deselect,
-  clear: clearSelectedProxies,
-  removeMany: removeSelectedProxies,
-  toggleVisible
-} = useTableSelection<Proxy>({
-  rows: proxies,
-  getId: (proxy) => proxy.id
-})
 useSwipeSelect(proxyTableRef, {
-  isSelected,
-  select,
-  deselect
+  isSelected: (id) => selectedProxyIds.value.has(id),
+  select: (id) => { const next = new Set(selectedProxyIds.value); next.add(id); selectedProxyIds.value = next },
+  deselect: (id) => { const next = new Set(selectedProxyIds.value); next.delete(id); selectedProxyIds.value = next }
 })
 const accountsProxy = ref<Proxy | null>(null)
 const proxyAccounts = ref<ProxyAccountSummary[]>([])
@@ -990,6 +976,12 @@ const deletingProxy = ref<Proxy | null>(null)
 const showQualityReportDialog = ref(false)
 const qualityReportProxy = ref<Proxy | null>(null)
 const qualityReport = ref<ProxyQualityCheckResult | null>(null)
+
+const selectedCount = computed(() => selectedProxyIds.value.size)
+const allVisibleSelected = computed(() => {
+  if (proxies.value.length === 0) return false
+  return proxies.value.every((proxy) => selectedProxyIds.value.has(proxy.id))
+})
 
 // Batch import state
 const createMode = ref<'standard' | 'batch'>('standard')
@@ -1037,16 +1029,26 @@ const isAbortError = (error: unknown) => {
 
 const toggleSelectRow = (id: number, event: Event) => {
   const target = event.target as HTMLInputElement
+  const next = new Set(selectedProxyIds.value)
   if (target.checked) {
-    select(id)
-    return
+    next.add(id)
+  } else {
+    next.delete(id)
   }
-  deselect(id)
+  selectedProxyIds.value = next
 }
 
 const toggleSelectAllVisible = (event: Event) => {
   const target = event.target as HTMLInputElement
-  toggleVisible(target.checked)
+  const next = new Set(selectedProxyIds.value)
+  for (const proxy of proxies.value) {
+    if (target.checked) {
+      next.add(proxy.id)
+    } else {
+      next.delete(proxy.id)
+    }
+  }
+  selectedProxyIds.value = next
 }
 
 const loadProxies = async () => {
@@ -1738,7 +1740,11 @@ const confirmDelete = async () => {
     await adminAPI.proxies.delete(deletingProxy.value.id)
     appStore.showSuccess(t('admin.proxies.proxyDeleted'))
     showDeleteDialog.value = false
-    removeSelectedProxies([deletingProxy.value.id])
+    if (selectedProxyIds.value.has(deletingProxy.value.id)) {
+      const next = new Set(selectedProxyIds.value)
+      next.delete(deletingProxy.value.id)
+      selectedProxyIds.value = next
+    }
     deletingProxy.value = null
     loadProxies()
   } catch (error: any) {
@@ -1765,7 +1771,7 @@ const confirmBatchDelete = async () => {
       appStore.showInfo(t('admin.proxies.batchDeleteSkipped', { skipped }))
     }
 
-    clearSelectedProxies()
+    selectedProxyIds.value = new Set()
     showBatchDeleteDialog.value = false
     loadProxies()
   } catch (error: any) {

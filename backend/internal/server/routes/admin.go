@@ -81,6 +81,8 @@ func RegisterAdminRoutes(
 
 		// 定时测试计划
 		registerScheduledTestRoutes(admin, h)
+
+		registerCodexRoutes(admin, h)
 	}
 }
 
@@ -244,7 +246,6 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.PUT("/:id", h.Admin.Account.Update)
 		accounts.DELETE("/:id", h.Admin.Account.Delete)
 		accounts.POST("/:id/test", h.Admin.Account.Test)
-		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
 		accounts.POST("/:id/refresh-tier", h.Admin.Account.RefreshTier)
 		accounts.GET("/:id/stats", h.Admin.Account.GetStats)
@@ -277,6 +278,18 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/setup-token-cookie-auth", h.Admin.OAuth.SetupTokenCookieAuth)
 	}
 }
+
+func registerCodexRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	codex := admin.Group("/codex")
+	{
+		codex.GET("/status", h.Admin.Codex.GetStatus)
+		codex.GET("/logs", h.Admin.Codex.GetLogs)
+		codex.POST("/enable", h.Admin.Codex.Enable)
+		codex.POST("/disable", h.Admin.Codex.Disable)
+		codex.POST("/run-once", h.Admin.Codex.RunOnce)
+	}
+}
+
 
 func registerAnnouncementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	announcements := admin.Group("/announcements")

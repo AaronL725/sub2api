@@ -153,7 +153,6 @@ export default {
     todayExpires: '(expires today)',
     daysLeft: '({days} days)',
     usedQuota: 'Used Quota',
-    resetNow: 'Resetting soon',
     subscriptionType: 'Subscription Type',
     subscriptionExpires: 'Subscription Expires',
     // Usage stat cells
@@ -336,6 +335,7 @@ export default {
     groups: 'Groups',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
+    codexRegister: 'Codex Register',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
@@ -571,6 +571,8 @@ export default {
     today: 'Today',
     total: 'Total',
     quota: 'Quota',
+    proxyBadge: 'Proxy',
+    proxyBadgeHint: 'This API key is marked as a Claude proxy key',
     lastUsedAt: 'Last Used',
     useKey: 'Use Key',
     useKeyModal: {
@@ -619,6 +621,8 @@ export default {
     customKeyTooShort: 'Custom key must be at least 16 characters',
     customKeyInvalidChars: 'Custom key can only contain letters, numbers, underscores, and hyphens',
     customKeyRequired: 'Please enter a custom key',
+    proxyKeyLabel: 'Claude Proxy Key',
+    proxyKeyHint: 'Marks this API key as a Claude proxy key for management and display.',
     ipRestriction: 'IP Restriction',
     ipWhitelist: 'IP Whitelist',
     ipWhitelistPlaceholder: '192.168.1.100\n10.0.0.0/8',
@@ -661,7 +665,6 @@ export default {
     resetRateLimitConfirmMessage: 'Are you sure you want to reset the rate limit usage for key "{name}"? All time window usage will be reset to zero. This action cannot be undone.',
     rateLimitResetSuccess: 'Rate limit usage reset successfully',
     failedToResetRateLimit: 'Failed to reset rate limit usage',
-    resetNow: 'Resetting soon',
     expiration: 'Expiration',
     expiresInDays: '{days} days',
     extendDays: '+{days} days',
@@ -726,15 +729,8 @@ export default {
     unknown: 'Unknown',
     in: 'In',
     out: 'Out',
-    inputTokenPrice: 'Input price',
-    outputTokenPrice: 'Output price',
-    perMillionTokens: '/ 1M tokens',
     cacheRead: 'Read',
     cacheWrite: 'Write',
-    serviceTier: 'Service tier',
-    serviceTierPriority: 'Fast',
-    serviceTierFlex: 'Flex',
-    serviceTierStandard: 'Standard',
     rate: 'Rate',
     original: 'Original',
     billed: 'Billed',
@@ -957,6 +953,56 @@ export default {
       noDataAvailable: 'No data available',
       recentUsage: 'Recent Usage',
       failedToLoad: 'Failed to load dashboard statistics'
+    },
+
+    codexRegister: {
+      title: 'Codex Register',
+      description: 'Manage Codex auto-registration status, execution cadence, and event logs in one place',
+      heroDescription: 'Manage Codex auto-registration runtime, execution cadence, and recent events with the same visual hierarchy used across the rest of the admin console.',
+      badge: {
+        adminConsole: 'Admin Console',
+        running: 'Running',
+        stopped: 'Stopped',
+        attention: 'Needs Attention',
+        healthy: 'No Errors'
+      },
+      actions: {
+        start: 'Start',
+        stop: 'Stop',
+        runOnce: 'Run Once',
+        refreshing: 'Refreshing…'
+      },
+      summary: {
+        totalCreated: 'Total Accounts Created',
+        lastSuccess: 'Last Success Time',
+        proxy: 'Proxy Configured',
+        sleepRange: 'Sleep Range (Seconds)',
+        empty: 'N/A',
+        proxyConfigured: 'Configured',
+        proxyMissing: 'Not Configured',
+        rangeValue: '{min} - {max}',
+        rangeValueWithUnit: '{min} - {max} seconds'
+      },
+      panels: {
+        statusTitle: 'Current Status',
+        statusDescription: 'Review the current switch state, proxy setup, and the latest failure signal in one place.',
+        polling: 'Auto refresh: {seconds} seconds',
+        serviceStatus: 'Service Status',
+        serviceEnabled: 'Current status: auto-registration is enabled',
+        serviceDisabled: 'Current status: auto-registration is disabled',
+        proxyConfig: 'Proxy Configuration',
+        proxyConfiguredDetail: 'Proxy is configured and the container can register through the current egress path.',
+        proxyMissingDetail: 'No proxy is configured. Confirm whether the container requires a dedicated network exit.',
+        lastSuccessTitle: 'Last Success Time',
+        lastSuccessEmpty: 'No successful runs yet',
+        sleepRangeTitle: 'Sleep Range',
+        errorTitle: 'Latest Error Log',
+        noErrors: 'No recent error output. The service currently looks healthy.',
+        eventsTitle: 'Recent Events',
+        eventsDescription: 'Shows recent runtime records and failures so you can quickly inspect container behavior.',
+        eventCount: '{count} records',
+        emptyEvents: 'No events yet'
+      }
     },
 
     dataManagement: {
@@ -1784,9 +1830,9 @@ export default {
         remaining: 'Remaining',
         matchedKeyword: 'Matched Keyword',
         errorMessage: 'Error Details',
-        reset: 'Recover State',
-        resetSuccess: 'Account state recovered successfully',
-        resetFailed: 'Failed to recover account state',
+        reset: 'Reset Status',
+        resetSuccess: 'Temp unschedulable status reset',
+        resetFailed: 'Failed to reset temp unschedulable status',
         failedToLoad: 'Failed to load temp unschedulable status',
         notActive: 'This account is not temporarily unschedulable.',
         expired: 'Expired',
@@ -1858,10 +1904,6 @@ export default {
       bulkDeleteSuccess: 'Deleted {count} account(s)',
       bulkDeletePartial: 'Partially deleted: {success} succeeded, {failed} failed',
       bulkDeleteFailed: 'Bulk delete failed',
-      recoverState: 'Recover State',
-      recoverStateHint: 'Used to recover error, rate-limit, and temporary unschedulable runtime state.',
-      recoverStateSuccess: 'Account state recovered successfully',
-      recoverStateFailed: 'Failed to recover account state',
       resetStatus: 'Reset Status',
       statusReset: 'Account status reset successfully',
       failedToResetStatus: 'Failed to reset account status',
@@ -1951,13 +1993,6 @@ export default {
       addModel: 'Add',
       modelExists: 'Model already exists',
       modelCount: '{count} models',
-      poolMode: 'Pool Mode',
-      poolModeHint: 'Enable when upstream is an account pool; errors won\'t mark local account status',
-      poolModeInfo:
-        'When enabled, upstream 429/403/401 errors will auto-retry without marking the account as rate-limited or errored. Suitable for upstream pointing to another sub2api instance.',
-      poolModeRetryCount: 'Same-Account Retries',
-      poolModeRetryCountHint:
-        'Only applies in pool mode. Use 0 to disable in-place retry. Default {default}, maximum {max}.',
       customErrorCodes: 'Custom Error Codes',
       customErrorCodesHint: 'Only stop scheduling for selected error codes',
       customErrorCodesWarning:
@@ -2500,21 +2535,7 @@ export default {
       failed: 'Failed',
       running: 'Running',
       schedule: 'Schedule',
-      cronHelp: 'Standard 5-field cron expression (e.g., */30 * * * *)',
-      cronTooltipTitle: 'Cron expression examples:',
-      cronTooltipMeaning: 'Defines when the test runs automatically. The 5 fields are: minute, hour, day, month, and weekday.',
-      cronTooltipExampleEvery30Min: '*/30 * * * *: run every 30 minutes',
-      cronTooltipExampleHourly: '0 * * * *: run at the start of every hour',
-      cronTooltipExampleDaily: '0 9 * * *: run every day at 09:00',
-      cronTooltipExampleWeekly: '0 9 * * 1: run every Monday at 09:00',
-      cronTooltipRange: 'Recommended range: use standard 5-field cron. For health checks, start with a moderate frequency such as every 30 minutes, every hour, or once a day instead of running too often.',
-      maxResultsTooltipTitle: 'What Max Results means:',
-      maxResultsTooltipMeaning: 'Sets how many historical test results are kept for a single plan so the result list does not grow without limit.',
-      maxResultsTooltipBody: 'Only the newest test results are kept. Once the number of saved results exceeds this value, older records are pruned automatically so the history list and storage stay under control.',
-      maxResultsTooltipExample: 'For example, 100 means keeping at most the latest 100 test results. When the 101st result is saved, the oldest one is removed.',
-      maxResultsTooltipRange: 'Recommended range: usually 20 to 200. Use 20-50 when you only care about recent health status, or 100-200 if you want a longer trend history.',
-      autoRecover: 'Auto Recover',
-      autoRecoverHelp: 'Automatically recover account from error/rate-limited state on successful test'
+      cronHelp: 'Standard 5-field cron expression (e.g., */30 * * * *)'
     },
 
     // Proxies
@@ -4137,30 +4158,6 @@ export default {
     viewAll: 'View all subscriptions',
     noSubscriptions: 'No active subscriptions',
     unlimited: 'Unlimited'
-  },
-
-  // Version Badge
-  version: {
-    currentVersion: 'Current Version',
-    latestVersion: 'Latest Version',
-    upToDate: "You're running the latest version.",
-    updateAvailable: 'A new version is available!',
-    releaseNotes: 'Release Notes',
-    noReleaseNotes: 'No release notes',
-    viewUpdate: 'View Update',
-    viewRelease: 'View Release',
-    viewChangelog: 'View Changelog',
-    refresh: 'Refresh',
-    sourceMode: 'Source Build',
-    sourceModeHint: 'Source build, use git pull to update',
-    updateNow: 'Update Now',
-    updating: 'Updating...',
-    updateComplete: 'Update Complete',
-    updateFailed: 'Update Failed',
-    restartRequired: 'Please restart the service to apply the update',
-    restartNow: 'Restart Now',
-    restarting: 'Restarting...',
-    retry: 'Retry'
   },
 
   // Recharge / Subscription Page

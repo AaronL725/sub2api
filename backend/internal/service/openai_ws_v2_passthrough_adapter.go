@@ -77,7 +77,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return errors.New("token is empty")
 	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
-	requestServiceTier := extractOpenAIServiceTierFromBody(firstClientMessage)
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
 	logOpenAIWSV2Passthrough(
 		"relay_start account_id=%d model=%s previous_response_id=%s first_message_type=%s first_message_bytes=%d",
@@ -179,7 +178,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 					},
 					Model:           turn.RequestModel,
-					ServiceTier:     requestServiceTier,
 					Stream:          true,
 					OpenAIWSMode:    true,
 					ResponseHeaders: cloneHeader(handshakeHeaders),
@@ -227,7 +225,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			CacheReadInputTokens:     relayResult.Usage.CacheReadInputTokens,
 		},
 		Model:           relayResult.RequestModel,
-		ServiceTier:     requestServiceTier,
 		Stream:          true,
 		OpenAIWSMode:    true,
 		ResponseHeaders: cloneHeader(handshakeHeaders),

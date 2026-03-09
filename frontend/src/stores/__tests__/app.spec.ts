@@ -2,11 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAppStore } from '@/stores/app'
 
-// Mock API 模块
-vi.mock('@/api/admin/system', () => ({
-  checkUpdates: vi.fn(),
-}))
-
 vi.mock('@/api/auth', () => ({
   getPublicSettings: vi.fn(),
 }))

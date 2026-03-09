@@ -39,6 +39,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Concurrency Control** - Per-user and per-account concurrency limits
 - **Rate Limiting** - Configurable request and token rate limits
 - **Admin Dashboard** - Web interface for monitoring and management
+- **Codex Registration** - Register and manage Codex accounts from a dedicated admin page
 
 ## Tech Stack
 

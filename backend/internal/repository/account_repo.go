@@ -659,10 +659,13 @@ func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear error failed: account=%d err=%v", id, err)
-	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	// 清除临时不可调度状态，重置 401 升级链
+	_, _ = r.sql.ExecContext(ctx, `
+		UPDATE accounts
+		SET temp_unschedulable_until = NULL,
+		    temp_unschedulable_reason = NULL
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
 	return nil
 }
 

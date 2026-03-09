@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -45,11 +44,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
-	}
-
-	// 2b. Handle BetaFastMode → service_tier: "priority"
-	if containsBetaToken(c.GetHeader("anthropic-beta"), claude.BetaFastMode) {
-		responsesReq.ServiceTier = "priority"
 	}
 
 	// 3. Model mapping
@@ -98,12 +92,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	upstreamReq, err := s.buildUpstreamRequest(ctx, c, account, responsesBody, token, isStream, promptCacheKey, false)
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
-	}
-
-	// Override session_id with a deterministic UUID derived from the sticky
-	// session key (buildUpstreamRequest may have set it to the raw value).
-	if promptCacheKey != "" {
-		upstreamReq.Header.Set("session_id", generateSessionUUID(promptCacheKey))
 	}
 
 	// 7. Send request
@@ -170,18 +158,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		result, handleErr = s.handleAnthropicStreamingResponse(resp, c, originalModel, mappedModel, startTime)
 	} else {
 		result, handleErr = s.handleAnthropicNonStreamingResponse(resp, c, originalModel, mappedModel, startTime)
-	}
-
-	// Propagate ServiceTier and ReasoningEffort to result for billing
-	if handleErr == nil && result != nil {
-		if responsesReq.ServiceTier != "" {
-			st := responsesReq.ServiceTier
-			result.ServiceTier = &st
-		}
-		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
-			re := responsesReq.Reasoning.Effort
-			result.ReasoningEffort = &re
-		}
 	}
 
 	// Extract and save Codex usage snapshot from response headers (for OAuth accounts)
@@ -438,3 +414,4 @@ func writeAnthropicError(c *gin.Context, statusCode int, errType, message string
 		},
 	})
 }
+

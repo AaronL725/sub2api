@@ -12,7 +12,6 @@ import redeemAPI from './redeem'
 import promoAPI from './promo'
 import announcementsAPI from './announcements'
 import settingsAPI from './settings'
-import systemAPI from './system'
 import subscriptionsAPI from './subscriptions'
 import usageAPI from './usage'
 import geminiAPI from './gemini'
@@ -23,6 +22,7 @@ import errorPassthroughAPI from './errorPassthrough'
 import dataManagementAPI from './dataManagement'
 import apiKeysAPI from './apiKeys'
 import scheduledTestsAPI from './scheduledTests'
+import codexAPI from './codex'
 
 /**
  * Unified admin API object for convenient access
@@ -37,7 +37,6 @@ export const adminAPI = {
   promo: promoAPI,
   announcements: announcementsAPI,
   settings: settingsAPI,
-  system: systemAPI,
   subscriptions: subscriptionsAPI,
   usage: usageAPI,
   gemini: geminiAPI,
@@ -47,7 +46,8 @@ export const adminAPI = {
   errorPassthrough: errorPassthroughAPI,
   dataManagement: dataManagementAPI,
   apiKeys: apiKeysAPI,
-  scheduledTests: scheduledTestsAPI
+  scheduledTests: scheduledTestsAPI,
+  codex: codexAPI
 }
 
 export {
@@ -60,7 +60,6 @@ export {
   promoAPI,
   announcementsAPI,
   settingsAPI,
-  systemAPI,
   subscriptionsAPI,
   usageAPI,
   geminiAPI,
@@ -70,7 +69,8 @@ export {
   errorPassthroughAPI,
   dataManagementAPI,
   apiKeysAPI,
-  scheduledTestsAPI
+  scheduledTestsAPI,
+  codexAPI
 }
 
 export default adminAPI

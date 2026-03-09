@@ -4,17 +4,17 @@
  */
 
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
-import { useAppStore } from '@/stores/app'
-import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
+import { useAdminSettingsStore } from '@/stores/adminSettings'
+import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { resolveDocumentTitle } from './title'
 
 /**
  * Route definitions with lazy loading
  */
-const routes: RouteRecordRaw[] = [
+export const routes: RouteRecordRaw[] = [
   // ==================== Setup Routes ====================
   {
     path: '/setup',
@@ -303,6 +303,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/codex-register',
+    name: 'AdminCodexRegister',
+    component: () => import('@/views/admin/CodexRegisterView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      titleKey: 'admin.codexRegister.title',
+      descriptionKey: 'admin.codexRegister.description'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),
@@ -545,7 +556,7 @@ router.onError((error) => {
     const now = Date.now()
 
     // Allow reload if never attempted or more than 10 seconds ago
-    if (!lastReload || now - parseInt(lastReload) > 10000) {
+    if (!lastReload || now - parseInt(lastReload, 10) > 10000) {
       sessionStorage.setItem(reloadKey, now.toString())
       console.warn('Chunk load error detected, reloading page to fetch latest version...')
       window.location.reload()

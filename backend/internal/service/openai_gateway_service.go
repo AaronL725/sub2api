@@ -81,6 +81,27 @@ var openaiPassthroughAllowedHeaders = map[string]bool{
 	"x-codex-turn-metadata": true,
 }
 
+var openAIUndefinedPlaceholderOptionalFields = map[string]struct{}{
+	"conversation":           {},
+	"include":                {},
+	"instructions":           {},
+	"max_completion_tokens":  {},
+	"max_output_tokens":      {},
+	"max_tool_calls":         {},
+	"metadata":               {},
+	"parallel_tool_calls":    {},
+	"previous_response_id":   {},
+	"prompt_cache_retention": {},
+	"safety_identifier":      {},
+	"temperature":            {},
+	"tool_choice":            {},
+	"tools":                  {},
+	"top_logprobs":           {},
+	"top_p":                  {},
+	"truncation":             {},
+	"user":                   {},
+}
+
 // codex_cli_only 拒绝时记录的请求头白名单（仅用于诊断日志，不参与上游透传）
 var codexCLIOnlyDebugHeaderWhitelist = []string{
 	"User-Agent",
@@ -213,9 +234,6 @@ type OpenAIForwardResult struct {
 	// This is set by the Anthropic Messages conversion path where
 	// the mapped upstream model differs from the client-facing model.
 	BillingModel string
-	// ServiceTier records the OpenAI Responses API service tier, e.g. "priority" / "flex".
-	// Nil means the request did not specify a recognized tier.
-	ServiceTier *string
 	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix.
 	// Stored for usage records display; nil means not provided / not applicable.
 	ReasoningEffort *string
@@ -1652,6 +1670,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		patchDisabled = true
 	}
 
+	if sanitizeOpenAIUndefinedPlaceholderFields(reqBody) {
+		bodyModified = true
+		disablePatch()
+	}
+
 	// 非透传模式下，instructions 为空时注入默认指令。
 	if isInstructionsEmpty(reqBody) {
 		reqBody["instructions"] = "You are a helpful coding assistant."
@@ -2043,11 +2066,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			})
 
 			s.handleFailoverSideEffects(ctx, resp, account)
-			return nil, &UpstreamFailoverError{
-				StatusCode:             resp.StatusCode,
-				ResponseBody:           respBody,
-				RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
-			}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 		}
 		return s.handleErrorResponse(ctx, resp, c, account, body)
 	}
@@ -2081,13 +2100,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	reasoningEffort := extractOpenAIReasoningEffort(reqBody, originalModel)
-	serviceTier := extractOpenAIServiceTier(reqBody)
 
 	return &OpenAIForwardResult{
 		RequestID:       resp.Header.Get("x-request-id"),
 		Usage:           *usage,
 		Model:           originalModel,
-		ServiceTier:     serviceTier,
 		ReasoningEffort: reasoningEffort,
 		Stream:          reqStream,
 		OpenAIWSMode:    false,
@@ -2107,29 +2124,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	if account != nil && account.Type == AccountTypeOAuth {
-		if rejectReason := detectOpenAIPassthroughInstructionsRejectReason(reqModel, body); rejectReason != "" {
-			rejectMsg := "OpenAI codex passthrough requires a non-empty instructions field"
-			setOpsUpstreamError(c, http.StatusForbidden, rejectMsg, "")
-			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-				Platform:           account.Platform,
-				AccountID:          account.ID,
-				AccountName:        account.Name,
-				UpstreamStatusCode: http.StatusForbidden,
-				Passthrough:        true,
-				Kind:               "request_error",
-				Message:            rejectMsg,
-				Detail:             rejectReason,
-			})
-			logOpenAIPassthroughInstructionsRejected(ctx, c, account, reqModel, rejectReason, body)
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": gin.H{
-					"type":    "forbidden_error",
-					"message": rejectMsg,
-				},
-			})
-			return nil, fmt.Errorf("openai passthrough rejected before upstream: %s", rejectReason)
-		}
-
 		normalizedBody, normalized, err := normalizeOpenAIPassthroughOAuthBody(body, isOpenAIResponsesCompactPath(c))
 		if err != nil {
 			return nil, err
@@ -2242,7 +2236,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		RequestID:       resp.Header.Get("x-request-id"),
 		Usage:           *usage,
 		Model:           reqModel,
-		ServiceTier:     extractOpenAIServiceTierFromBody(body),
 		ReasoningEffort: reasoningEffort,
 		Stream:          reqStream,
 		OpenAIWSMode:    false,
@@ -2863,11 +2856,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		Detail:             upstreamDetail,
 	})
 	if shouldDisable {
-		return nil, &UpstreamFailoverError{
-			StatusCode:             resp.StatusCode,
-			ResponseBody:           body,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
-		}
+		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: body}
 	}
 
 	// Return appropriate error response
@@ -3680,11 +3669,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result.BillingModel != "" {
 		billingModel = result.BillingModel
 	}
-	serviceTier := ""
-	if result.ServiceTier != nil {
-		serviceTier = strings.TrimSpace(*result.ServiceTier)
-	}
-	cost, err := s.billingService.CalculateCostWithServiceTier(billingModel, tokens, multiplier, serviceTier)
+	cost, err := s.billingService.CalculateCost(billingModel, tokens, multiplier)
 	if err != nil {
 		cost = &CostBreakdown{ActualCost: 0}
 	}
@@ -3705,7 +3690,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		AccountID:             account.ID,
 		RequestID:             result.RequestID,
 		Model:                 billingModel,
-		ServiceTier:           result.ServiceTier,
 		ReasoningEffort:       result.ReasoningEffort,
 		InputTokens:           actualInputTokens,
 		OutputTokens:          result.Usage.OutputTokens,
@@ -4086,7 +4070,7 @@ func extractOpenAIRequestMetaFromBody(body []byte) (model string, stream bool, p
 }
 
 // normalizeOpenAIPassthroughOAuthBody 将透传 OAuth 请求体收敛为旧链路关键行为：
-// 1) store=false 2) 非 compact 保持 stream=true；compact 强制 stream=false
+// 1) store=false 2) 非 compact 保持 stream=true；compact 强制 stream=false 3) instructions 为空时补默认值
 func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
@@ -4131,6 +4115,16 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 		}
 	}
 
+	instructions := gjson.GetBytes(normalized, "instructions")
+	if !instructions.Exists() || instructions.Type != gjson.String || strings.TrimSpace(instructions.String()) == "" {
+		next, err := sjson.SetBytes(normalized, "instructions", "You are a helpful coding assistant.")
+		if err != nil {
+			return body, false, fmt.Errorf("normalize passthrough body default instructions: %w", err)
+		}
+		normalized = next
+		changed = true
+	}
+
 	return normalized, changed, nil
 }
 
@@ -4171,40 +4165,6 @@ func extractOpenAIReasoningEffortFromBody(body []byte, requestedModel string) *s
 		return nil
 	}
 	return &value
-}
-
-func extractOpenAIServiceTier(reqBody map[string]any) *string {
-	if reqBody == nil {
-		return nil
-	}
-	raw, ok := reqBody["service_tier"].(string)
-	if !ok {
-		return nil
-	}
-	return normalizeOpenAIServiceTier(raw)
-}
-
-func extractOpenAIServiceTierFromBody(body []byte) *string {
-	if len(body) == 0 {
-		return nil
-	}
-	return normalizeOpenAIServiceTier(gjson.GetBytes(body, "service_tier").String())
-}
-
-func normalizeOpenAIServiceTier(raw string) *string {
-	value := strings.ToLower(strings.TrimSpace(raw))
-	if value == "" {
-		return nil
-	}
-	if value == "fast" {
-		value = "priority"
-	}
-	switch value {
-	case "priority", "flex":
-		return &value
-	default:
-		return nil
-	}
 }
 
 func getOpenAIRequestBodyMap(c *gin.Context, body []byte) (map[string]any, error) {
@@ -4261,4 +4221,23 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 		// Only store known effort levels for now to keep UI consistent.
 		return ""
 	}
+}
+
+func sanitizeOpenAIUndefinedPlaceholderFields(reqBody map[string]any) bool {
+	if len(reqBody) == 0 {
+		return false
+	}
+
+	modified := false
+	for field := range openAIUndefinedPlaceholderOptionalFields {
+		value, ok := reqBody[field]
+		if !ok {
+			continue
+		}
+		if s, ok := value.(string); ok && strings.TrimSpace(s) == "[undefined]" {
+			delete(reqBody, field)
+			modified = true
+		}
+	}
+	return modified
 }

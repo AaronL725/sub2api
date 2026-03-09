@@ -41,7 +41,7 @@ const (
 	claudeAPIURL            = "https://api.anthropic.com/v1/messages?beta=true"
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
 	stickySessionTTL        = time.Hour // 粘性会话TTL
-	defaultMaxLineSize      = 500 * 1024 * 1024
+	defaultMaxLineSize      = 40 * 1024 * 1024
 	// Canonical Claude Code banner. Keep it EXACT (no trailing whitespace/newlines)
 	// to match real Claude CLI traffic as closely as possible. When we need a visual
 	// separator between system blocks, we add "\n\n" at concatenation time.
@@ -1938,7 +1938,10 @@ func (s *GatewayService) isAccountAllowedForPlatform(account *Account, platform 
 		if account.Platform == platform {
 			return true
 		}
-		return account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()
+		if account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled() {
+			return true
+		}
+		return false
 	}
 	return account.Platform == platform
 }
@@ -3331,6 +3334,10 @@ func (s *GatewayService) isModelSupportedByAccount(account *Account, requestedMo
 	if account.Platform == PlatformSora {
 		return s.isSoraModelSupportedByAccount(account, requestedModel)
 	}
+	// OpenAI 透传模式：仅替换认证，允许所有模型
+	if account.Platform == PlatformOpenAI && account.IsOpenAIPassthroughEnabled() {
+		return true
+	}
 	// OAuth/SetupToken 账号使用 Anthropic 标准映射（短ID → 长ID）
 	if account.Platform == PlatformAnthropic && account.Type != AccountTypeAPIKey {
 		requestedModel = claude.NormalizeModelID(requestedModel)
@@ -4315,11 +4322,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					return ""
 				}(),
 			})
-			return nil, &UpstreamFailoverError{
-				StatusCode:             resp.StatusCode,
-				ResponseBody:           respBody,
-				RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
-			}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 		}
 		return s.handleRetryExhaustedError(ctx, resp, c, account)
 	}
@@ -4349,11 +4352,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				return ""
 			}(),
 		})
-		return nil, &UpstreamFailoverError{
-			StatusCode:             resp.StatusCode,
-			ResponseBody:           respBody,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
-		}
+		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 	}
 	if resp.StatusCode >= 400 {
 		// 可选：对部分 400 触发 failover（默认关闭以保持语义）
@@ -4443,6 +4442,43 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,
 	}, nil
+}
+
+func buildAnthropicMessagesURL(base string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(base), "/")
+	if strings.HasSuffix(normalized, "/v1/responses") {
+		normalized = strings.TrimSuffix(normalized, "/v1/responses")
+	}
+	if strings.HasSuffix(normalized, "/responses") {
+		normalized = strings.TrimSuffix(normalized, "/responses")
+	}
+	if strings.HasSuffix(normalized, "/v1/messages") {
+		return normalized + "?beta=true"
+	}
+	if strings.HasSuffix(normalized, "/v1") {
+		return normalized + "/messages?beta=true"
+	}
+	return normalized + "/v1/messages?beta=true"
+}
+
+func buildAnthropicCountTokensURL(base string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(base), "/")
+	if strings.HasSuffix(normalized, "/v1/responses") {
+		normalized = strings.TrimSuffix(normalized, "/v1/responses")
+	}
+	if strings.HasSuffix(normalized, "/responses") {
+		normalized = strings.TrimSuffix(normalized, "/responses")
+	}
+	if strings.HasSuffix(normalized, "/v1/messages/count_tokens") {
+		return normalized + "?beta=true"
+	}
+	if strings.HasSuffix(normalized, "/v1/messages") {
+		return normalized + "/count_tokens?beta=true"
+	}
+	if strings.HasSuffix(normalized, "/v1") {
+		return normalized + "/messages/count_tokens?beta=true"
+	}
+	return normalized + "/v1/messages/count_tokens?beta=true"
 }
 
 func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
@@ -4588,11 +4624,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
 					return ""
 				}(),
 			})
-			return nil, &UpstreamFailoverError{
-				StatusCode:             resp.StatusCode,
-				ResponseBody:           respBody,
-				RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
-			}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 		}
 		return s.handleRetryExhaustedError(ctx, resp, c, account)
 	}
@@ -4622,11 +4654,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
 				return ""
 			}(),
 		})
-		return nil, &UpstreamFailoverError{
-			StatusCode:             resp.StatusCode,
-			ResponseBody:           respBody,
-			RetryableOnSameAccount: account.IsPoolMode() && isPoolModeRetryableStatus(resp.StatusCode),
-		}
+		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 	}
 
 	if resp.StatusCode >= 400 {
@@ -4679,7 +4707,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		if err != nil {
 			return nil, err
 		}
-		targetURL = validatedURL + "/v1/messages?beta=true"
+		targetURL = buildAnthropicMessagesURL(validatedURL)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
@@ -5052,6 +5080,7 @@ func writeAnthropicPassthroughResponseHeaders(dst http.Header, src http.Header, 
 func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, error) {
 	// 确定目标URL
 	targetURL := claudeAPIURL
+
 	if account.Type == AccountTypeAPIKey {
 		baseURL := account.GetBaseURL()
 		if baseURL != "" {
@@ -5059,7 +5088,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			if err != nil {
 				return nil, err
 			}
-			targetURL = validatedURL + "/v1/messages?beta=true"
+			targetURL = buildAnthropicMessagesURL(validatedURL)
 		}
 	}
 
@@ -5339,19 +5368,6 @@ func droppedBetaSet(extra ...string) map[string]struct{} {
 		m[t] = struct{}{}
 	}
 	return m
-}
-
-// containsBetaToken checks if a comma-separated header value contains the given token.
-func containsBetaToken(header, token string) bool {
-	if header == "" || token == "" {
-		return false
-	}
-	for _, p := range strings.Split(header, ",") {
-		if strings.TrimSpace(p) == token {
-			return true
-		}
-	}
-	return false
 }
 
 func buildBetaTokenSet(tokens []string) map[string]struct{} {
@@ -7195,7 +7211,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 		if err != nil {
 			return nil, err
 		}
-		targetURL = validatedURL + "/v1/messages/count_tokens?beta=true"
+		targetURL = buildAnthropicCountTokensURL(validatedURL)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
@@ -7242,7 +7258,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 			if err != nil {
 				return nil, err
 			}
-			targetURL = validatedURL + "/v1/messages/count_tokens?beta=true"
+			targetURL = buildAnthropicCountTokensURL(validatedURL)
 		}
 	}
 

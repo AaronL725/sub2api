@@ -13,6 +13,13 @@ const mockLogin = vi.fn()
 const mockLogin2FA = vi.fn()
 const mockPush = vi.fn()
 
+const localStorageMock = {
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+  clear: vi.fn()
+}
+
 vi.mock('@/api', () => ({
   authAPI: {
     login: (...args: any[]) => mockLogin(...args),
@@ -23,10 +30,6 @@ vi.mock('@/api', () => ({
     refreshToken: vi.fn(),
   },
   isTotp2FARequired: (response: any) => response?.requires_2fa === true,
-}))
-
-vi.mock('@/api/admin/system', () => ({
-  checkUpdates: vi.fn(),
 }))
 
 vi.mock('@/api/auth', () => ({
@@ -89,6 +92,11 @@ describe('LoginForm 核心逻辑', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    Object.defineProperty(window, 'localStorage', {
+      value: localStorageMock,
+      writable: true,
+      configurable: true
+    })
   })
 
   it('成功登录后跳转到 dashboard', async () => {

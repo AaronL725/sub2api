@@ -7,7 +7,7 @@
       </div>
 
       <!-- Settings Form -->
-      <form v-else @submit.prevent="saveSettings" class="space-y-6">
+      <form v-else novalidate @submit.prevent="saveSettings" class="space-y-6">
         <!-- Tab Navigation -->
         <div class="sticky top-0 z-10 overflow-x-auto scrollbar-hide">
           <nav class="settings-tabs">
@@ -27,7 +27,11 @@
         </div>
 
         <!-- Tab: Security — Admin API Key -->
-        <div v-show="activeTab === 'security'" class="space-y-6">
+        <fieldset
+          v-show="activeTab === 'security'"
+          :disabled="activeTab !== 'security'"
+          class="space-y-6 border-0 p-0 m-0 min-w-0"
+        >
         <!-- Admin API Key Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -166,10 +170,14 @@
             </div>
           </div>
         </div>
-        </div><!-- /Tab: Security — Admin API Key -->
+        </fieldset><!-- /Tab: Security — Admin API Key -->
 
         <!-- Tab: Gateway — Stream Timeout -->
-        <div v-show="activeTab === 'gateway'" class="space-y-6">
+        <fieldset
+          v-show="activeTab === 'gateway'"
+          :disabled="activeTab !== 'gateway'"
+          class="space-y-6 border-0 p-0 m-0 min-w-0"
+        >
         <!-- Stream Timeout Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -307,7 +315,6 @@
             </template>
           </div>
         </div>
-
         <!-- Request Rectifier Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -405,10 +412,14 @@
             </template>
           </div>
         </div>
-        </div><!-- /Tab: Gateway -->
+        </fieldset><!-- /Tab: Gateway — Stream Timeout & Rectifier (continued below with Claude Code & Scheduling) -->
 
         <!-- Tab: Security — Registration, Turnstile, LinuxDo -->
-        <div v-show="activeTab === 'security'" class="space-y-6">
+        <fieldset
+          v-show="activeTab === 'security'"
+          :disabled="activeTab !== 'security'"
+          class="space-y-6 border-0 p-0 m-0 min-w-0"
+        >
         <!-- Registration Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -742,10 +753,14 @@
             </div>
           </div>
         </div>
-        </div><!-- /Tab: Security — Registration, Turnstile, LinuxDo -->
+        </fieldset><!-- /Tab: Security — Registration, Turnstile, LinuxDo -->
 
         <!-- Tab: Users -->
-        <div v-show="activeTab === 'users'" class="space-y-6">
+        <fieldset
+          v-show="activeTab === 'users'"
+          :disabled="activeTab !== 'users'"
+          class="space-y-6 border-0 p-0 m-0 min-w-0"
+        >
         <!-- Default Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -884,10 +899,14 @@
             </div>
           </div>
         </div>
-        </div><!-- /Tab: Users -->
+        </fieldset><!-- /Tab: Users -->
 
         <!-- Tab: Gateway — Claude Code, Scheduling -->
-        <div v-show="activeTab === 'gateway'" class="space-y-6">
+        <fieldset
+          v-show="activeTab === 'gateway'"
+          :disabled="activeTab !== 'gateway'"
+          class="space-y-6 border-0 p-0 m-0 min-w-0"
+        >
         <!-- Claude Code Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -917,6 +936,8 @@
           </div>
         </div>
 
+
+
         <!-- Gateway Scheduling Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -944,10 +965,14 @@
             </div>
           </div>
         </div>
-        </div><!-- /Tab: Gateway — Claude Code, Scheduling -->
+        </fieldset><!-- /Tab: Gateway — Claude Code, Scheduling -->
 
         <!-- Tab: General -->
-        <div v-show="activeTab === 'general'" class="space-y-6">
+        <fieldset
+          v-show="activeTab === 'general'"
+          :disabled="activeTab !== 'general'"
+          class="space-y-6 border-0 p-0 m-0 min-w-0"
+        >
         <!-- Site Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -1301,10 +1326,14 @@
           </div>
         </div>
 
-        </div><!-- /Tab: General -->
+        </fieldset><!-- /Tab: General -->
 
         <!-- Tab: Email -->
-        <div v-show="activeTab === 'email'" class="space-y-6">
+        <fieldset
+          v-show="activeTab === 'email'"
+          :disabled="activeTab !== 'email'"
+          class="space-y-6 border-0 p-0 m-0 min-w-0"
+        >
         <!-- Email disabled hint - show when email_verify_enabled is off -->
         <div v-if="!form.email_verify_enabled" class="card">
           <div class="p-6">
@@ -1521,7 +1550,7 @@
             </div>
           </div>
         </div>
-        </div><!-- /Tab: Email -->
+        </fieldset><!-- /Tab: Email -->
 
         <!-- Save Button -->
         <div class="flex justify-end">
@@ -1551,6 +1580,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api'
 import type {
@@ -1577,11 +1607,12 @@ import {
 } from '@/utils/registrationEmailPolicy'
 
 const { t } = useI18n()
+const route = useRoute()
 const appStore = useAppStore()
 const adminSettingsStore = useAdminSettingsStore()
 
 type SettingsTab = 'general' | 'security' | 'users' | 'gateway' | 'email'
-const activeTab = ref<SettingsTab>('general')
+const activeTab = ref<SettingsTab>(route.query.tab === 'gateway' ? 'gateway' : 'general')
 const settingsTabs = [
   { key: 'general'  as SettingsTab, icon: 'home'   as const },
   { key: 'security' as SettingsTab, icon: 'shield' as const },

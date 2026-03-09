@@ -865,7 +865,9 @@ func isOpenAIWSClientDisconnectError(err error) bool {
 		strings.Contains(message, "use of closed network connection") ||
 		strings.Contains(message, "connection reset by peer") ||
 		strings.Contains(message, "broken pipe") ||
-		strings.Contains(message, "an established connection was aborted")
+		strings.Contains(message, "an established connection was aborted") ||
+		strings.Contains(message, "wsasend") ||
+		strings.Contains(message, "connection was aborted")
 }
 
 func classifyOpenAIWSReadFallbackReason(err error) string {
@@ -2307,7 +2309,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		RequestID:       responseID,
 		Usage:           *usage,
 		Model:           originalModel,
-		ServiceTier:     extractOpenAIServiceTier(reqBody),
 		ReasoningEffort: extractOpenAIReasoningEffort(reqBody, originalModel),
 		Stream:          reqStream,
 		OpenAIWSMode:    true,
@@ -2924,7 +2925,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					RequestID:       responseID,
 					Usage:           usage,
 					Model:           originalModel,
-					ServiceTier:     extractOpenAIServiceTierFromBody(payload),
 					ReasoningEffort: extractOpenAIReasoningEffortFromBody(payload, originalModel),
 					Stream:          reqStream,
 					OpenAIWSMode:    true,

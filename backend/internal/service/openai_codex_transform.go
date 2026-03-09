@@ -1,6 +1,7 @@
 package service
 
 import (
+	"reflect"
 	"strings"
 )
 
@@ -67,6 +68,22 @@ var codexModelMap = map[string]string{
 	"gpt-5-nano":                 "gpt-5.1",
 }
 
+var codexOAuthAllowedTopLevelFields = map[string]struct{}{
+	"model":                {},
+	"input":                {},
+	"instructions":         {},
+	"tools":                {},
+	"tool_choice":          {},
+	"stream":               {},
+	"store":                {},
+	"include":              {},
+	"reasoning":            {},
+	"previous_response_id": {},
+	"prompt_cache_key":     {},
+	"parallel_tool_calls":  {},
+	"metadata":             {},
+}
+
 type codexTransformResult struct {
 	Modified        bool
 	NormalizedModel string
@@ -77,6 +94,23 @@ func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact
 	result := codexTransformResult{}
 	// 工具续链需求会影响存储策略与 input 过滤逻辑。
 	needsToolContinuation := NeedsToolContinuation(reqBody)
+
+	originalLen := len(reqBody)
+	normalizedReqBody := make(map[string]any, len(codexOAuthAllowedTopLevelFields))
+	for key, value := range reqBody {
+		if _, ok := codexOAuthAllowedTopLevelFields[key]; ok {
+			normalizedReqBody[key] = value
+		}
+	}
+	if len(normalizedReqBody) != originalLen {
+		result.Modified = true
+	}
+	for key := range reqBody {
+		delete(reqBody, key)
+	}
+	for key, value := range normalizedReqBody {
+		reqBody[key] = value
+	}
 
 	model := ""
 	if v, ok := reqBody["model"].(string); ok {
@@ -113,27 +147,17 @@ func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact
 		}
 	}
 
-	// Strip parameters unsupported by codex models via the Responses API.
-	for _, key := range []string{
-		"max_output_tokens",
-		"max_completion_tokens",
-		"temperature",
-		"top_p",
-		"frequency_penalty",
-		"presence_penalty",
-	} {
-		if _, ok := reqBody[key]; ok {
-			delete(reqBody, key)
-			result.Modified = true
-		}
-	}
-
 	if normalizeCodexTools(reqBody) {
 		result.Modified = true
 	}
 
 	if v, ok := reqBody["prompt_cache_key"].(string); ok {
-		result.PromptCacheKey = strings.TrimSpace(v)
+		trimmed := strings.TrimSpace(v)
+		result.PromptCacheKey = trimmed
+		if trimmed != v {
+			reqBody["prompt_cache_key"] = trimmed
+			result.Modified = true
+		}
 	}
 
 	// instructions 处理逻辑：根据是否是 Codex CLI 分别调用不同方法
@@ -143,9 +167,11 @@ func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact
 
 	// 续链场景保留 item_reference 与 id，避免 call_id 上下文丢失。
 	if input, ok := reqBody["input"].([]any); ok {
-		input = filterCodexInput(input, needsToolContinuation)
-		reqBody["input"] = input
-		result.Modified = true
+		filtered := filterCodexInput(input, needsToolContinuation)
+		if !reflect.DeepEqual(input, filtered) {
+			reqBody["input"] = filtered
+			result.Modified = true
+		}
 	}
 
 	return result
@@ -167,7 +193,6 @@ func normalizeCodexModel(model string) string {
 	}
 
 	normalized := strings.ToLower(modelID)
-
 	if strings.Contains(normalized, "gpt-5.4") || strings.Contains(normalized, "gpt 5.4") {
 		return "gpt-5.4"
 	}

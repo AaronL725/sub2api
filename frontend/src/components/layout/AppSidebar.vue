@@ -17,8 +17,6 @@
           <span class="text-lg font-bold text-gray-900 dark:text-white">
             {{ siteName }}
           </span>
-          <!-- Version Badge -->
-          <VersionBadge :version="siteVersion" />
         </div>
       </transition>
     </div>
@@ -151,7 +149,6 @@ import { computed, h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
-import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 
 interface NavItem {
@@ -178,7 +175,6 @@ const isDark = ref(document.documentElement.classList.contains('dark'))
 // Site settings from appStore (cached, no flicker)
 const siteName = computed(() => appStore.siteName)
 const siteLogo = computed(() => appStore.siteLogo)
-const siteVersion = computed(() => appStore.siteVersion)
 const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
 
 // SVG Icon Components
@@ -590,7 +586,7 @@ const customMenuItemsForAdmin = computed(() => {
 })
 
 // Admin navigation items
-const adminNavItems = computed((): NavItem[] => {
+  const adminNavItems = computed((): NavItem[] => {
   const baseItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
     ...(adminSettingsStore.opsMonitoringEnabled
@@ -600,6 +596,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
+    { path: '/admin/codex-register', label: t('nav.codexRegister'), icon: ServerIcon },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },

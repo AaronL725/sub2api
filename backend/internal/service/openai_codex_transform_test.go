@@ -95,6 +95,119 @@ func TestApplyCodexOAuthTransform_CompactForcesNonStreaming(t *testing.T) {
 	require.True(t, result.Modified)
 }
 
+func TestApplyCodexOAuthTransform_StripsUnsupportedServiceTier(t *testing.T) {
+	reqBody := map[string]any{
+		"model":        "gpt-5.4",
+		"service_tier": "auto",
+	}
+
+	result := applyCodexOAuthTransform(reqBody, false, false)
+
+	_, hasServiceTier := reqBody["service_tier"]
+	require.False(t, hasServiceTier)
+	require.True(t, result.Modified)
+}
+
+func TestApplyCodexOAuthTransform_StripsUnsupportedUser(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.2",
+		"user":  "u_123",
+	}
+
+	result := applyCodexOAuthTransform(reqBody, false, false)
+
+	_, hasUser := reqBody["user"]
+	require.False(t, hasUser)
+	require.True(t, result.Modified)
+}
+
+func TestApplyCodexOAuthTransform_StripsUnsupportedThinking(t *testing.T) {
+	reqBody := map[string]any{
+		"model":    "gpt-5.4",
+		"thinking": map[string]any{"type": "enabled"},
+	}
+
+	result := applyCodexOAuthTransform(reqBody, false, false)
+
+	_, hasThinking := reqBody["thinking"]
+	require.False(t, hasThinking)
+	require.True(t, result.Modified)
+}
+
+func TestApplyCodexOAuthTransform_PreservesAllowedTopLevelFields(t *testing.T) {
+	reqBody := map[string]any{
+		"model":                "gpt-5.2",
+		"input":                []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "hi"}}}},
+		"instructions":         "be concise",
+		"tools":                []any{map[string]any{"type": "function", "name": "bash", "parameters": map[string]any{"type": "object"}}},
+		"tool_choice":          "auto",
+		"include":              []any{"reasoning.encrypted_content"},
+		"reasoning":            map[string]any{"effort": "high"},
+		"previous_response_id": "resp_123",
+		"prompt_cache_key":     "cache-key",
+		"parallel_tool_calls":  true,
+		"metadata":             map[string]any{"source": "test"},
+	}
+
+	applyCodexOAuthTransform(reqBody, false, false)
+
+	require.Contains(t, reqBody, "model")
+	require.Contains(t, reqBody, "input")
+	require.Contains(t, reqBody, "instructions")
+	require.Contains(t, reqBody, "tools")
+	require.Contains(t, reqBody, "tool_choice")
+	require.Contains(t, reqBody, "include")
+	require.Contains(t, reqBody, "reasoning")
+	require.Contains(t, reqBody, "previous_response_id")
+	require.Contains(t, reqBody, "prompt_cache_key")
+	require.Contains(t, reqBody, "parallel_tool_calls")
+	require.Contains(t, reqBody, "metadata")
+}
+
+func TestApplyCodexOAuthTransform_StripsUnknownTopLevelField(t *testing.T) {
+	reqBody := map[string]any{
+		"model":         "gpt-5.2",
+		"mystery_field": "boom",
+	}
+
+	result := applyCodexOAuthTransform(reqBody, false, false)
+
+	_, hasMystery := reqBody["mystery_field"]
+	require.False(t, hasMystery)
+	require.True(t, result.Modified)
+}
+
+func TestApplyCodexOAuthTransform_PromptCacheKeyTrimmedInBody(t *testing.T) {
+	reqBody := map[string]any{
+		"model":            "gpt-5.2",
+		"prompt_cache_key": "  cache-key  ",
+	}
+
+	result := applyCodexOAuthTransform(reqBody, false, false)
+
+	value, ok := reqBody["prompt_cache_key"].(string)
+	require.True(t, ok)
+	require.Equal(t, "cache-key", value)
+	require.Equal(t, "cache-key", result.PromptCacheKey)
+	require.True(t, result.Modified)
+}
+
+func TestApplyCodexOAuthTransform_UnchangedInputDoesNotMarkModified(t *testing.T) {
+	reqBody := map[string]any{
+		"model":        "gpt-5.2",
+		"store":        false,
+		"stream":       true,
+		"instructions": "existing instructions",
+		"input": []any{
+			map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "hi"}}},
+		},
+	}
+
+	result := applyCodexOAuthTransform(reqBody, false, false)
+
+	require.False(t, result.Modified)
+}
+
 func TestApplyCodexOAuthTransform_NonContinuationDefaultsStoreFalseAndStripsIDs(t *testing.T) {
 	// 非续链场景：未设置 store 时默认 false，并移除 input 中的 id。
 
