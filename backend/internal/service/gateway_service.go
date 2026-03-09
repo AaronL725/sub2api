@@ -4446,12 +4446,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 func buildAnthropicMessagesURL(base string) string {
 	normalized := strings.TrimRight(strings.TrimSpace(base), "/")
-	if strings.HasSuffix(normalized, "/v1/responses") {
-		normalized = strings.TrimSuffix(normalized, "/v1/responses")
-	}
-	if strings.HasSuffix(normalized, "/responses") {
-		normalized = strings.TrimSuffix(normalized, "/responses")
-	}
+	normalized = strings.TrimSuffix(normalized, "/v1/responses")
+	normalized = strings.TrimSuffix(normalized, "/responses")
 	if strings.HasSuffix(normalized, "/v1/messages") {
 		return normalized + "?beta=true"
 	}
@@ -4463,12 +4459,8 @@ func buildAnthropicMessagesURL(base string) string {
 
 func buildAnthropicCountTokensURL(base string) string {
 	normalized := strings.TrimRight(strings.TrimSpace(base), "/")
-	if strings.HasSuffix(normalized, "/v1/responses") {
-		normalized = strings.TrimSuffix(normalized, "/v1/responses")
-	}
-	if strings.HasSuffix(normalized, "/responses") {
-		normalized = strings.TrimSuffix(normalized, "/responses")
-	}
+	normalized = strings.TrimSuffix(normalized, "/v1/responses")
+	normalized = strings.TrimSuffix(normalized, "/responses")
 	if strings.HasSuffix(normalized, "/v1/messages/count_tokens") {
 		return normalized + "?beta=true"
 	}

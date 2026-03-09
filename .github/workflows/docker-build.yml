@@ -39,3 +39,13 @@ jobs:
           tags: ghcr.io/${{ steps.owner.outputs.owner }}/sub2api:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push codex-register
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: tools/codex_register/Dockerfile
+          push: true
+          tags: ghcr.io/${{ steps.owner.outputs.owner }}/codex-register:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

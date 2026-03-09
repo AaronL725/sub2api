@@ -165,8 +165,8 @@ services:
   codex-register:
     image: codex-register:local
     build:
-      context: ../..
-      dockerfile: sub2api/tools/codex_register/Dockerfile
+      context: ..
+      dockerfile: tools/codex_register/Dockerfile
     container_name: sub2api-codex-register
     restart: unless-stopped
     environment:

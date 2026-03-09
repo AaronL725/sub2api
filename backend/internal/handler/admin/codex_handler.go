@@ -37,7 +37,7 @@ func (h *CodexHandler) proxyGet(c *gin.Context, path string) {
 		response.Error(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		response.Error(c, http.StatusBadGateway, err.Error())
@@ -58,7 +58,7 @@ func (h *CodexHandler) proxyPost(c *gin.Context, path string) {
 		response.Error(c, http.StatusBadGateway, err.Error())
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		response.Error(c, http.StatusBadGateway, err.Error())
