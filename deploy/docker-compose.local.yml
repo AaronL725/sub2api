@@ -21,45 +21,18 @@
 
 services:
   # ===========================================================================
-  # Caddy Reverse Proxy
-  # ===========================================================================
-  caddy:
-    image: caddy:2-alpine
-    container_name: sub2api-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy_data:/data
-      - ./caddy_config:/config
-      - ./caddy_logs:/var/log/caddy
-    environment:
-      - TZ=${TZ:-UTC}
-    depends_on:
-      sub2api:
-        condition: service_healthy
-    networks:
-      - sub2api-network
-
-  # ===========================================================================
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: sub2api:local
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    image: ghcr.io/aaronl725/sub2api:latest
     container_name: sub2api
     restart: unless-stopped
     ulimits:
       nofile:
         soft: 100000
         hard: 100000
-    # ports:
-    #   - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
+    ports:
+      - "127.0.0.1:8082:8080"
     volumes:
       # Local directory mapping for easy migration
       - ./data:/app/data
