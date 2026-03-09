@@ -6,6 +6,9 @@
 data/
 postgres_data/
 redis_data/
+caddy_data/
+caddy_config/
+caddy_logs/
 
 # Environment configuration (contains sensitive information)
 .env
