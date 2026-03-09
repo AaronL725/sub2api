@@ -131,7 +131,7 @@ def ensure_dict(value: object) -> JSONDict:
 def parse_group_ids() -> List[int]:
     raw = get_env("CODEX_GROUP_IDS", "")
     if not raw:
-        return [1]
+        return []
     group_ids: List[int] = []
     for item in raw.split(","):
         item = item.strip()
@@ -143,8 +143,6 @@ def parse_group_ids() -> List[int]:
             continue
         if value > 0:
             group_ids.append(value)
-    if not group_ids:
-        return [1]
     return group_ids
 
 
