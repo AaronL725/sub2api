@@ -337,6 +337,7 @@ export default {
     groups: '分组管理',
     subscriptions: '订阅管理',
     accounts: '账号管理',
+    codexRegister: 'Codex 注册',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
@@ -1005,6 +1006,55 @@ export default {
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
       failedToLoad: '加载仪表盘数据失败'
+    },
+
+    codexRegister: {
+      title: 'Codex 注册',
+      description: '统一管理 Codex 自动注册的运行状态、执行节奏与最近日志',
+      heroDescription: '在一个页面中管理 Codex 自动注册服务的运行状态、执行节奏与最近事件。',
+      badge: {
+        running: '运行中',
+        stopped: '已停止',
+        adminConsole: '管理控制台',
+        attention: '需关注',
+        healthy: '健康'
+      },
+      actions: {
+        start: '启动',
+        stop: '停止',
+        runOnce: '执行一次',
+        refreshing: '刷新中...'
+      },
+      summary: {
+        totalCreated: '创建账号数',
+        lastSuccess: '最近成功时间',
+        proxy: '代理',
+        proxyConfigured: '已配置',
+        proxyMissing: '未配置',
+        sleepRange: '休眠区间',
+        rangeValue: '{min}-{max}秒',
+        rangeValueWithUnit: '{min} 秒到 {max} 秒'
+      },
+      panels: {
+        polling: '每 {seconds} 秒轮询',
+        statusTitle: '运行状态',
+        statusDescription: '查看 Codex 自动注册工作进程的当前状态与运行健康度。',
+        serviceStatus: '服务状态',
+        serviceEnabled: '自动注册工作进程已启用',
+        serviceDisabled: '自动注册工作进程已停止',
+        proxyConfig: '代理配置',
+        proxyConfiguredDetail: '注册流量将通过已配置代理转发。',
+        proxyMissingDetail: '当前未配置代理，注册流量将直接出网。',
+        lastSuccessTitle: '最近成功时间',
+        lastSuccessEmpty: '暂无成功记录',
+        sleepRangeTitle: '休眠区间',
+        errorTitle: '最近错误',
+        noErrors: 'Codex 注册服务最近没有上报错误。',
+        eventsTitle: '最近事件',
+        eventsDescription: '这里展示从 Codex 注册工作进程拉取的最近日志。',
+        eventCount: '{count} 条事件',
+        emptyEvents: '暂无事件记录。'
+      }
     },
 
     backup: {

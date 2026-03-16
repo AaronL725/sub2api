@@ -337,6 +337,7 @@ export default {
     groups: 'Groups',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
+    codexRegister: 'Codex Register',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
@@ -983,6 +984,55 @@ export default {
       requestsShort: 'Req',
       tokensShort: 'Tok',
       failedToLoad: 'Failed to load dashboard statistics'
+    },
+
+    codexRegister: {
+      title: 'Codex Register',
+      description: 'Manage Codex auto-registration status, execution cadence, and recent logs',
+      heroDescription: 'Manage Codex auto-registration runtime, execution cadence, and recent events in one place.',
+      badge: {
+        running: 'Running',
+        stopped: 'Stopped',
+        adminConsole: 'Admin Console',
+        attention: 'Attention',
+        healthy: 'Healthy'
+      },
+      actions: {
+        start: 'Start',
+        stop: 'Stop',
+        runOnce: 'Run Once',
+        refreshing: 'Refreshing...'
+      },
+      summary: {
+        totalCreated: 'Created Accounts',
+        lastSuccess: 'Last Success',
+        proxy: 'Proxy',
+        proxyConfigured: 'Configured',
+        proxyMissing: 'Not configured',
+        sleepRange: 'Sleep Range',
+        rangeValue: '{min}-{max}s',
+        rangeValueWithUnit: '{min}s to {max}s'
+      },
+      panels: {
+        polling: 'Poll every {seconds}s',
+        statusTitle: 'Runtime Status',
+        statusDescription: 'Inspect the current Codex auto-register worker state and runtime health.',
+        serviceStatus: 'Service Status',
+        serviceEnabled: 'Auto-register worker is enabled',
+        serviceDisabled: 'Auto-register worker is disabled',
+        proxyConfig: 'Proxy Configuration',
+        proxyConfiguredDetail: 'A proxy is configured for outbound registration traffic.',
+        proxyMissingDetail: 'No proxy is configured. Registration uses direct outbound traffic.',
+        lastSuccessTitle: 'Last Success',
+        lastSuccessEmpty: 'No successful runs yet',
+        sleepRangeTitle: 'Sleep Range',
+        errorTitle: 'Last Error',
+        noErrors: 'No recent errors were reported by the Codex register service.',
+        eventsTitle: 'Recent Events',
+        eventsDescription: 'Recent service logs pulled from the Codex register worker.',
+        eventCount: '{count} events',
+        emptyEvents: 'No events yet.'
+      }
     },
 
     backup: {

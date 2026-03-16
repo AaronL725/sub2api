@@ -84,6 +84,9 @@ func RegisterAdminRoutes(
 
 		// 定时测试计划
 		registerScheduledTestRoutes(admin, h)
+
+		// Codex 自动注册
+		registerCodexRoutes(admin, h)
 	}
 }
 
@@ -296,6 +299,17 @@ func registerAnnouncementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		announcements.PUT("/:id", h.Admin.Announcement.Update)
 		announcements.DELETE("/:id", h.Admin.Announcement.Delete)
 		announcements.GET("/:id/read-status", h.Admin.Announcement.ListReadStatus)
+	}
+}
+
+func registerCodexRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	codex := admin.Group("/codex")
+	{
+		codex.GET("/status", h.Admin.Codex.GetStatus)
+		codex.GET("/logs", h.Admin.Codex.GetLogs)
+		codex.POST("/enable", h.Admin.Codex.Enable)
+		codex.POST("/disable", h.Admin.Codex.Disable)
+		codex.POST("/run-once", h.Admin.Codex.RunOnce)
 	}
 }
 

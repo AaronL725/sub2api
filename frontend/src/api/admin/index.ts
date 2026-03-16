@@ -24,6 +24,7 @@ import dataManagementAPI from './dataManagement'
 import apiKeysAPI from './apiKeys'
 import scheduledTestsAPI from './scheduledTests'
 import backupAPI from './backup'
+import codexAPI from './codex'
 
 /**
  * Unified admin API object for convenient access
@@ -49,7 +50,8 @@ export const adminAPI = {
   dataManagement: dataManagementAPI,
   apiKeys: apiKeysAPI,
   scheduledTests: scheduledTestsAPI,
-  backup: backupAPI
+  backup: backupAPI,
+  codex: codexAPI
 }
 
 export {
@@ -73,7 +75,8 @@ export {
   dataManagementAPI,
   apiKeysAPI,
   scheduledTestsAPI,
-  backupAPI
+  backupAPI,
+  codexAPI
 }
 
 export default adminAPI
