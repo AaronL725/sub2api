@@ -106,7 +106,7 @@ def append_log(level: str, message: str) -> None:
     with status_lock:
         recent_logs.append(
             {
-                "time": datetime.utcnow().isoformat() + "Z",
+                "time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "level": level,
                 "message": message,
             }
@@ -177,7 +177,8 @@ AUTH_URL = "https://auth.openai.com/oauth/authorize"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
 SENTINEL_URL = "https://sentinel.openai.com/backend-api/sentinel/req"
 SIGNUP_URL = "https://auth.openai.com/api/accounts/authorize/continue"
-SEND_OTP_URL = "https://auth.openai.com/api/accounts/passwordless/send-otp"
+REGISTER_URL = "https://auth.openai.com/api/accounts/user/register"
+SEND_OTP_URL = "https://auth.openai.com/api/accounts/email-otp/send"
 VERIFY_OTP_URL = "https://auth.openai.com/api/accounts/email-otp/validate"
 CREATE_ACCOUNT_URL = "https://auth.openai.com/api/accounts/create_account"
 WORKSPACE_SELECT_URL = "https://auth.openai.com/api/accounts/workspace/select"
@@ -187,6 +188,7 @@ DEFAULT_SCOPE = "openid email profile offline_access"
 MAX_RETRY_PER_ACCOUNT = 2
 IMAP_POLL_TIMEOUT = 180
 OTP_RESEND_INTERVAL = 25
+DEFAULT_PASSWORD_LENGTH = 12
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +241,71 @@ def random_birthday() -> str:
     m = random.randint(1, 12)
     d = random.randint(1, 28)
     return f"{y}-{m:02d}-{d:02d}"
+
+
+def generate_registration_password(length: int = DEFAULT_PASSWORD_LENGTH) -> str:
+    size = max(length, 10)
+    alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+    required = [
+        secrets.choice("abcdefghijklmnopqrstuvwxyz"),
+        secrets.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+        secrets.choice("0123456789"),
+        secrets.choice("!@#$%^&*"),
+    ]
+    remaining = [secrets.choice(alphabet) for _ in range(size - len(required))]
+    password_chars = required + remaining
+    random.SystemRandom().shuffle(password_chars)
+    return "".join(password_chars)
+
+
+def classify_signup_page_type(page_type: str) -> str:
+    normalized = (page_type or "").strip().lower()
+    if not normalized:
+        return "unknown"
+    if normalized == "email_otp_verification" or "email_otp" in normalized:
+        return "existing_account"
+    if normalized == "password" or "password" in normalized:
+        return "password_registration"
+    return "unknown"
+
+
+def _short_openai_error(status: int, text: str, limit: int = 300) -> str:
+    body = (text or "").strip()
+    compact = re.sub(r"\s+", " ", body)
+    lowered = compact.lower()
+    if "just a moment" in lowered:
+        compact = "blocked by Cloudflare challenge (Just a moment...)"
+    return f"{status} {compact[:limit]}".strip()
+
+
+def _extract_failure_summary(stdout: str, stderr: str) -> str:
+    interesting = (
+        "attempt ",
+        "failed:",
+        "runtimeerror:",
+        "traceback",
+        "just a moment",
+        "passwordless signup is unavailable",
+        "submit email failed",
+        "send otp failed",
+        "verify otp failed",
+        "create account failed",
+        "token exchange failed",
+    )
+    lines: List[str] = []
+    for chunk in (stdout, stderr):
+        if not chunk:
+            continue
+        lines.extend(chunk.splitlines())
+    for raw_line in reversed(lines):
+        line = raw_line.strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if any(marker in lowered for marker in interesting):
+            cleaned = re.sub(r"^\d{4}-\d{2}-\d{2}.*?\[(?:INFO|WARNING|ERROR)\]\s*", "", line)
+            return cleaned[:240]
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1223,6 +1290,27 @@ def register_account(
     def _sleep(lo: float, hi: float) -> None:
         time.sleep(random.uniform(lo, hi))
 
+    def _send_email_otp(http: APISession, referer: str) -> APIResponse:
+        headers = {"Referer": referer, "Accept": "application/json"}
+        response = http.get(SEND_OTP_URL, headers=headers)
+        if response.ok():
+            return response
+        fallback = http.post_json(SEND_OTP_URL, {}, headers=headers)
+        if fallback.ok():
+            return fallback
+        return fallback
+
+    def _register_password(http: APISession, email: str) -> str:
+        password = generate_registration_password()
+        register_resp = http.post_json(
+            REGISTER_URL,
+            {"password": password, "username": email},
+            headers={"Referer": "https://auth.openai.com/create-account/password"},
+        )
+        if not register_resp.ok():
+            raise RuntimeError(f"Register password failed: {_short_openai_error(register_resp.status, register_resp.text)}")
+        return password
+
     with APISession(proxy) as http:
         # 1. Initiate OAuth
         oauth = generate_oauth_url()
@@ -1266,37 +1354,40 @@ def register_account(
             },
         )
         if not signup_resp.ok():
-            raise RuntimeError(f"Submit email failed: {signup_resp.status} {signup_resp.text[:300]}")
+            raise RuntimeError(f"Submit email failed: {_short_openai_error(signup_resp.status, signup_resp.text)}")
         log.info("      OK")
 
-        # Detect if account already exists (OTP auto-sent)
+        # Detect the next registration branch. New accounts now go through password setup.
         try:
             step3_data = signup_resp.json()
             page_type = step3_data.get("page", {}).get("type", "")
         except Exception:
             page_type = ""
-        is_existing = page_type == "email_otp_verification"
+        page_kind = classify_signup_page_type(page_type)
+        is_existing = page_kind == "existing_account"
+        password = ""
         log.info(f"      Page type: {page_type or 'new_account'}")
         _sleep(0.5, 1.5)
 
-        # 4. Send OTP (only for new accounts; existing accounts get it automatically)
+        # 4. Existing accounts receive OTP automatically. New accounts must set a password first.
         if is_existing:
             log.info("  [4] OTP already sent (existing account)")
         else:
+            log.info("  [4] Registering password...")
+            password = _register_password(http, email_addr)
+            log.info("      OK")
+            _sleep(0.5, 1.5)
+
             otp_sent_at = time.time()
-            log.info("  [4] Sending OTP...")
-            otp_resp = http.post_json(
-                SEND_OTP_URL, {},
-                headers={"Referer": "https://auth.openai.com/create-account/password"},
-            )
+            log.info("  [5] Sending OTP...")
+            otp_resp = _send_email_otp(http, "https://auth.openai.com/create-account/password")
             if not otp_resp.ok():
-                raise RuntimeError(f"Send OTP failed: {otp_resp.status} {otp_resp.text[:300]}")
+                raise RuntimeError(f"Send OTP failed: {_short_openai_error(otp_resp.status, otp_resp.text)}")
             log.info(f"      OTP sent to {email_addr}")
 
-        # 5. Get OTP code
+        # 6. Get OTP code
         def _resend_otp() -> bool:
-            r = http.post_json(SEND_OTP_URL, {},
-                               headers={"Referer": "https://auth.openai.com/email-verification"})
+            r = _send_email_otp(http, "https://auth.openai.com/email-verification")
             return r.ok()
 
         if mail_account or domain_mail:
@@ -1315,36 +1406,36 @@ def register_account(
             raise RuntimeError("No OTP retrieval method available")
         _sleep(0.3, 1.0)
 
-        # 6. Verify OTP
-        log.info(f"  [6] Verifying OTP: {code}")
+        # 7. Verify OTP
+        log.info(f"  [7] Verifying OTP: {code}")
         verify_resp = http.post_json(
             VERIFY_OTP_URL, {"code": code},
             headers={"Referer": "https://auth.openai.com/email-verification"},
         )
         if not verify_resp.ok():
-            raise RuntimeError(f"OTP verify failed: {verify_resp.status} {verify_resp.text[:300]}")
+            raise RuntimeError(f"OTP verify failed: {_short_openai_error(verify_resp.status, verify_resp.text)}")
         log.info("      OK")
         _sleep(0.5, 1.5)
 
-        # 7. Create account (skip for existing)
+        # 8. Create account profile (skip for existing accounts that already have one).
         name = ""
         if is_existing:
-            log.info("  [7] Skipped (account exists)")
+            log.info("  [8] Skipped (account exists)")
         else:
             name = random_name()
             birthday = random_birthday()
-            log.info(f"  [7] Creating account: {name}, {birthday}")
+            log.info(f"  [8] Creating account: {name}, {birthday}")
             create_resp = http.post_json(
                 CREATE_ACCOUNT_URL,
                 {"name": name, "birthdate": birthday},
                 headers={"Referer": "https://auth.openai.com/about-you"},
             )
             if not create_resp.ok():
-                raise RuntimeError(f"Create account failed: {create_resp.status} {create_resp.text[:300]}")
+                raise RuntimeError(f"Create account failed: {_short_openai_error(create_resp.status, create_resp.text)}")
             log.info("      OK")
             _sleep(0.5, 1.5)
 
-        # 8. Select workspace
+        # 9. Select workspace
         auth_cookie = http.get_cookie("oai-client-auth-session")
         if not auth_cookie:
             raise RuntimeError("Missing oai-client-auth-session cookie")
@@ -1359,7 +1450,7 @@ def register_account(
         if not workspace_id:
             raise RuntimeError("No workspace_id found")
 
-        log.info(f"  [8] Selecting workspace: {workspace_id[:20]}...")
+        log.info(f"  [9] Selecting workspace: {workspace_id[:20]}...")
         select_resp = http.post_json(
             WORKSPACE_SELECT_URL,
             {"workspace_id": workspace_id},
@@ -1371,8 +1462,8 @@ def register_account(
         if not continue_url:
             raise RuntimeError("Missing continue_url")
 
-        # 9. Follow redirects to get token
-        log.info("  [9] Following redirects for token...")
+        # 10. Follow redirects to get token
+        log.info("  [10] Following redirects for token...")
         callback_url = http.follow_redirects(continue_url)
         if not callback_url:
             raise RuntimeError("Redirect chain failed, no callback URL")
@@ -1412,6 +1503,8 @@ def register_account(
                                      time.gmtime(now + int(token_data.get("expires_in", 0)))),
             "last_refresh": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
         }
+        if password:
+            result["password"] = password
         log.info("  Registration successful!")
         return result
 
@@ -1679,15 +1772,20 @@ def run_codex_once(tokens_dir: Path) -> List[Tuple[Path, List[JSONDict]]]:
     print("[codex-register] stdout:\n" + (result.stdout or ""), flush=True)
     if result.stderr:
         print("[codex-register] stderr:\n" + result.stderr, flush=True)
+    failure_summary = _extract_failure_summary(result.stdout or "", result.stderr or "")
 
     if result.returncode != 0:
         print(f"[codex-register] 注册脚本退出码非 0: {result.returncode}", flush=True)
         append_log("error", f"script_exit_nonzero:{result.returncode}")
+        if failure_summary:
+            append_log("error", f"register_flow_failed:{failure_summary}")
         return []
 
     json_files = sorted(tokens_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not json_files:
         print("[codex-register] 未找到新的 token JSON 文件", flush=True)
+        if failure_summary:
+            append_log("warn", f"register_flow_failed:{failure_summary}")
         append_log("warn", "no_token_json_found")
         return []
 
@@ -1814,7 +1912,7 @@ def upsert_account(cur, token_info: JSONDict) -> str:
             append_log("info", f"skip_unchanged:{email or account_id}")
             return "skipped"
 
-        extra["codex_auto_register_updated_at"] = datetime.utcnow().isoformat() + "Z"
+        extra["codex_auto_register_updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         cur.execute(
             "UPDATE accounts SET credentials = %s, extra = %s, status = 'active', schedulable = true, updated_at = NOW() WHERE id = %s",
             (pg_json(credentials), pg_json(extra), existing_id),
@@ -1828,7 +1926,7 @@ def upsert_account(cur, token_info: JSONDict) -> str:
     name = f"codex-{identifier}"
     credentials = build_credentials({}, token_info)
     extra = build_extra({}, token_info)
-    extra["codex_auto_register_updated_at"] = datetime.utcnow().isoformat() + "Z"
+    extra["codex_auto_register_updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     cur.execute(
         "INSERT INTO accounts (name, platform, type, credentials, extra, concurrency, priority, rate_multiplier, status, schedulable, auto_pause_on_expired) "
@@ -1847,7 +1945,7 @@ def run_one_cycle(tokens_dir: Path) -> None:
     global last_token_email, last_created_email, last_created_account_id, last_updated_email, last_updated_account_id
     global last_processed_records
     with status_lock:
-        last_run = datetime.utcnow()
+        last_run = datetime.now(timezone.utc)
     try:
         conn = create_db_connection()
         cur = conn.cursor()
@@ -1901,7 +1999,7 @@ def run_one_cycle(tokens_dir: Path) -> None:
                         append_log("error", f"archive_failed:{source_file.name}:{exc}")
                         print(f"[codex-register] 归档 token 文件失败（保留重试）: {source_file} {exc}", flush=True)
             with status_lock:
-                last_success = datetime.utcnow()
+                last_success = datetime.now(timezone.utc)
                 last_error = ""
             append_log("info", f"cycle_completed:{last_processed_records}")
         else:
@@ -1968,6 +2066,17 @@ class CodexRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
+    def _write_json(self, status_code: int, payload: Any) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status_code)
+        self._cors_headers()
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
         self._cors_headers()
@@ -1975,78 +2084,40 @@ class CodexRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/status":
-            body = json.dumps(get_status_payload()).encode("utf-8")
-            self.send_response(200)
-            self._cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
+            self._write_json(200, get_status_payload())
             return
         if self.path == "/logs":
             with status_lock:
                 logs = list(recent_logs)
-            body = json.dumps({"logs": logs}).encode("utf-8")
-            self.send_response(200)
-            self._cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
+            self._write_json(200, {"logs": logs})
             return
         if self.path == "/health":
-            body = json.dumps({"ok": True}).encode("utf-8")
-            self.send_response(200)
-            self._cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
+            self._write_json(200, {"ok": True})
             return
 
-        self.send_response(404)
-        self._cors_headers()
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"error":"not_found"}')
+        self._write_json(404, {"error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
         global enabled, tokens_dir_global
         if self.path == "/enable":
             with status_lock:
                 enabled = True
-            body = json.dumps(get_status_payload()).encode("utf-8")
-            self.send_response(200)
-            self._cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
+            self._write_json(200, get_status_payload())
             return
         if self.path == "/disable":
             with status_lock:
                 enabled = False
-            body = json.dumps(get_status_payload()).encode("utf-8")
-            self.send_response(200)
-            self._cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
+            self._write_json(200, get_status_payload())
             return
         if self.path == "/run-once":
             with status_lock:
                 run_once_tokens_dir = tokens_dir_global
             if run_once_tokens_dir is not None:
                 run_one_cycle(run_once_tokens_dir)
-            body = json.dumps(get_status_payload()).encode("utf-8")
-            self.send_response(200)
-            self._cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
+            self._write_json(200, get_status_payload())
             return
 
-        self.send_response(404)
-        self._cors_headers()
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"error":"not_found"}')
+        self._write_json(404, {"error": "not_found"})
 
 
 def main() -> None:

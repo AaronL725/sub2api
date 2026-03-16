@@ -1,4 +1,3 @@
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -30,6 +29,33 @@ class _FakeConn:
 
 
 class CodexRegisterServiceTests(unittest.TestCase):
+    def test_classify_signup_page_type_supports_password_registration_flow(self):
+        self.assertEqual(service.classify_signup_page_type("create_account_password"), "password_registration")
+        self.assertEqual(service.classify_signup_page_type("password"), "password_registration")
+        self.assertEqual(service.classify_signup_page_type("email_otp_verification"), "existing_account")
+
+    def test_generate_registration_password_has_minimum_complexity(self):
+        password = service.generate_registration_password(12)
+
+        self.assertGreaterEqual(len(password), 12)
+        self.assertRegex(password, r"[a-z]")
+        self.assertRegex(password, r"[A-Z]")
+        self.assertRegex(password, r"\d")
+        self.assertRegex(password, r"[!@#$%^&*]")
+
+    def test_extract_failure_summary_prefers_actionable_openai_error(self):
+        stdout = "\n".join(
+            [
+                "2026-03-16 06:49:53,544 [WARNING] Attempt 1 failed: RuntimeError: Send OTP failed: 401 Passwordless signup is unavailable.",
+                "2026-03-16 06:49:53,545 [INFO] Retry #2...",
+            ]
+        )
+
+        self.assertEqual(
+            service._extract_failure_summary(stdout, ""),
+            "Attempt 1 failed: RuntimeError: Send OTP failed: 401 Passwordless signup is unavailable.",
+        )
+
     def test_build_model_mapping_contains_supported_defaults(self):
         self.assertEqual(
             service.build_model_mapping(),
@@ -80,18 +106,18 @@ class CodexRegisterServiceTests(unittest.TestCase):
         )
 
     def test_archive_processed_file_moves_json_out_of_active_directory(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tokens_dir = Path(tmp) / "tokens"
-            processed_dir = tokens_dir / "processed"
-            tokens_dir.mkdir(parents=True)
-            source = tokens_dir / "token.json"
-            source.write_text('{"email":"a@example.com"}', encoding="utf-8")
+        source = Path("tokens/token.json")
+        processed_dir = Path("tokens/processed")
 
+        with mock.patch.object(Path, "mkdir") as mkdir, mock.patch.object(Path, "exists", autospec=True) as exists, mock.patch.object(
+            service.shutil, "move"
+        ) as move:
+            exists.side_effect = lambda candidate: candidate == source
             archived = service.archive_processed_file(source, processed_dir)
 
-            self.assertFalse(source.exists())
-            self.assertTrue(archived.exists())
-            self.assertEqual(archived.parent, processed_dir)
+        mkdir.assert_called_once_with(parents=True, exist_ok=True)
+        move.assert_called_once_with(str(source), str(processed_dir / source.name))
+        self.assertEqual(archived, processed_dir / source.name)
 
     def test_should_update_account_returns_false_for_timestamp_only_change(self):
         current_credentials = {"email": "a@example.com", "access_token": "same"}
@@ -173,28 +199,26 @@ class CodexRegisterServiceTests(unittest.TestCase):
         self.assertNotIn("UPDATE accounts SET credentials", executed_sql)
 
     def test_run_one_cycle_archives_successful_file_and_leaves_failed_file(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tokens_dir = Path(tmp) / "tokens"
-            tokens_dir.mkdir(parents=True)
-            good = tokens_dir / "good.json"
-            bad = tokens_dir / "bad.json"
+        tokens_dir = Path("tokens")
+        good = tokens_dir / "good.json"
+        bad = tokens_dir / "bad.json"
 
-            cur = mock.Mock()
-            conn = _FakeConn(cur)
+        cur = mock.Mock()
+        conn = _FakeConn(cur)
 
-            with mock.patch.object(service, "create_db_connection", return_value=conn), mock.patch.object(
-                service,
-                "run_codex_once",
-                return_value=[
-                    (good, [{"email": "ok@example.com"}]),
-                    (bad, [{"email": "fail@example.com"}]),
-                ],
-            ), mock.patch.object(service, "upsert_account", side_effect=["skipped", RuntimeError("boom")]), mock.patch.object(
-                service,
-                "archive_processed_file",
-                side_effect=lambda source, processed_dir: processed_dir / source.name,
-            ) as archive_processed_file:
-                service.run_one_cycle(tokens_dir)
+        with mock.patch.object(service, "create_db_connection", return_value=conn), mock.patch.object(
+            service,
+            "run_codex_once",
+            return_value=[
+                (good, [{"email": "ok@example.com"}]),
+                (bad, [{"email": "fail@example.com"}]),
+            ],
+        ), mock.patch.object(service, "upsert_account", side_effect=["skipped", RuntimeError("boom")]), mock.patch.object(
+            service,
+            "archive_processed_file",
+            side_effect=lambda source, processed_dir: processed_dir / source.name,
+        ) as archive_processed_file:
+            service.run_one_cycle(tokens_dir)
 
         archived_sources = [call.args[0] for call in archive_processed_file.call_args_list]
         self.assertEqual(archived_sources, [good])
