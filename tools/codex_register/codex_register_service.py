@@ -172,7 +172,8 @@ def get_env(name: str, default=None, required: bool = False) -> str:
     return value or ""
 
 
-MAILTM_BASE = "https://api.mail.tm"
+TEMPMAIL_BASE = "https://api.tempmail.lol/v2"
+MAILTM_BASE = TEMPMAIL_BASE  # legacy alias; default mailbox provider is now Tempmail.lol
 AUTH_URL = "https://auth.openai.com/oauth/authorize"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
 SENTINEL_URL = "https://sentinel.openai.com/backend-api/sentinel/req"
@@ -879,6 +880,155 @@ def poll_verification_code_imap(
         _close()
 
 
+class EmailServiceError(RuntimeError):
+    pass
+
+
+def _coerce_positive_int(raw: str, default: int) -> int:
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _proxy_url_from_proxies(proxies: Any = None) -> str:
+    if isinstance(proxies, dict):
+        return str(proxies.get("https") or proxies.get("http") or "").strip()
+    return str(proxies or "").strip()
+
+
+class TempmailService:
+    def __init__(self, *, proxy_url: str = "", base_url: str = "", timeout: int = 30, max_retries: int = 3):
+        self.proxy_url = proxy_url.strip()
+        self.base_url = (base_url or TEMPMAIL_BASE).rstrip("/")
+        self.timeout = max(timeout, 5)
+        self.max_retries = max(max_retries, 1)
+        self._email_cache: Dict[str, Dict[str, Any]] = {}
+
+    @property
+    def proxies(self) -> Optional[Dict[str, str]]:
+        if not self.proxy_url:
+            return None
+        return {"http": self.proxy_url, "https": self.proxy_url}
+
+    def _request(self, method: str, path: str, **kwargs: Any):
+        requests = get_requests_module()
+        kwargs.setdefault("timeout", self.timeout)
+        kwargs.setdefault("impersonate", "chrome")
+        if self.proxies and "proxies" not in kwargs:
+            kwargs["proxies"] = self.proxies
+        return requests.request(method, f"{self.base_url}{path}", **kwargs)
+
+    def create_email(self) -> Dict[str, Any]:
+        last_error = "unknown error"
+        for _ in range(self.max_retries):
+            try:
+                response = self._request(
+                    "POST",
+                    "/inbox/create",
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                    json={},
+                )
+                if response.status_code not in (200, 201):
+                    last_error = f"status={response.status_code}"
+                    time.sleep(1)
+                    continue
+
+                data = response.json()
+                email = str(data.get("address") or "").strip()
+                token = str(data.get("token") or "").strip()
+                if not email or not token:
+                    last_error = "missing address/token"
+                    time.sleep(1)
+                    continue
+
+                info = {
+                    "email": email,
+                    "service_id": token,
+                    "token": token,
+                    "created_at": time.time(),
+                }
+                self._email_cache[email] = info
+                return info
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+                time.sleep(1)
+
+        raise EmailServiceError(f"create tempmail inbox failed: {last_error}")
+
+    def get_verification_code(
+        self,
+        *,
+        email: str,
+        email_id: Optional[str] = None,
+        timeout: int = 120,
+        pattern: str = r"(?<!\d)(\d{6})(?!\d)",
+    ) -> Optional[str]:
+        token = (email_id or self._email_cache.get(email, {}).get("token") or "").strip()
+        if not token:
+            raise EmailServiceError(f"missing tempmail token for {email}")
+
+        seen_ids: Set[str] = set()
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                response = self._request(
+                    "GET",
+                    "/inbox",
+                    params={"token": token},
+                    headers={"Accept": "application/json"},
+                )
+                if response.status_code != 200:
+                    time.sleep(3)
+                    continue
+
+                data = response.json()
+                if data is None or (isinstance(data, dict) and not data):
+                    return None
+
+                emails = data.get("emails", []) if isinstance(data, dict) else []
+                if not isinstance(emails, list):
+                    time.sleep(3)
+                    continue
+
+                for message in emails:
+                    if not isinstance(message, dict):
+                        continue
+                    message_id = str(message.get("date") or message.get("id") or "").strip()
+                    if not message_id or message_id in seen_ids:
+                        continue
+                    seen_ids.add(message_id)
+
+                    sender = str(message.get("from") or "").lower()
+                    subject = str(message.get("subject") or "")
+                    body = str(message.get("body") or "")
+                    html = message.get("html") or ""
+                    if isinstance(html, list):
+                        html = "\n".join(str(item) for item in html)
+                    content = "\n".join([sender, subject, body, str(html)])
+                    if "openai" not in sender and "openai" not in content.lower():
+                        continue
+                    match = re.search(pattern, content)
+                    if match:
+                        return match.group(1)
+            except Exception:
+                pass
+
+            time.sleep(3)
+
+        return None
+
+
+def _build_tempmail_service(proxies: Any = None) -> TempmailService:
+    return TempmailService(
+        proxy_url=_proxy_url_from_proxies(proxies),
+        base_url=get_env("CODEX_TEMPMAIL_BASE_URL", TEMPMAIL_BASE),
+        timeout=_coerce_positive_int(get_env("CODEX_TEMPMAIL_TIMEOUT", "30"), 30),
+        max_retries=_coerce_positive_int(get_env("CODEX_TEMPMAIL_MAX_RETRIES", "3"), 3),
+    )
+
+
 def _mailtm_headers(*, token: str = "", use_json: bool = False) -> Dict[str, Any]:
     headers = {"Accept": "application/json"}
     if use_json:
@@ -922,6 +1072,13 @@ def _mailtm_domains(proxies: Any = None) -> List[str]:
 
 
 def get_email_and_token(proxies: Any = None) -> tuple[str, str]:
+    try:
+        info = _build_tempmail_service(proxies).create_email()
+        return str(info.get("email") or ""), str(info.get("token") or "")
+    except Exception as exc:
+        print(f"[Error] 请求 Tempmail.lol API 出错: {exc}")
+        return "", ""
+
     requests = get_requests_module()
     try:
         domains = _mailtm_domains(proxies)
@@ -967,6 +1124,21 @@ def get_email_and_token(proxies: Any = None) -> tuple[str, str]:
 
 
 def get_oai_code(token: str, email: str, proxies: Any = None) -> str:
+    service = _build_tempmail_service(proxies)
+    regex = r"(?<!\d)(\d{6})(?!\d)"
+    print(f"[*] 正在等待邮箱 {email} 的验证码...", end="", flush=True)
+    for _ in range(40):
+        print(".", end="", flush=True)
+        try:
+            code = service.get_verification_code(email=email, email_id=token, timeout=3, pattern=regex)
+            if code:
+                print(" 抓到验证码", code)
+                return code
+        except Exception:
+            pass
+    print(" 超时，未收到验证码")
+    return ""
+
     requests = get_requests_module()
     url_list = f"{MAILTM_BASE}/messages"
     regex = r"(?<!\d)(\d{6})(?!\d)"
@@ -1287,7 +1459,7 @@ def register_account(
         email_addr: Email to register with.
         proxy: HTTP proxy URL.
         used_codes: Set of already-used OTP codes.
-        get_otp_fn: Callable(email, proxies) -> code for Mail.tm mode.
+        get_otp_fn: Callable(email, proxies) -> code for Tempmail/temporary mailbox mode.
         mail_account: MailAccount for Outlook IMAP OTP retrieval.
         domain_mail: Domain catch-all IMAP config dict.
     """
@@ -1404,10 +1576,10 @@ def register_account(
                 otp_sent_at=otp_sent_at, domain_mail=domain_mail,
             )
         elif get_otp_fn:
-            # Mail.tm polling
+            # Tempmail.lol polling
             code = get_otp_fn(email_addr)
             if not code:
-                raise RuntimeError("Failed to get OTP from Mail.tm")
+                raise RuntimeError("Failed to get OTP from Tempmail.lol")
         else:
             raise RuntimeError("No OTP retrieval method available")
         _sleep(0.3, 1.0)
@@ -1548,7 +1720,7 @@ def run(proxy: Optional[str]) -> Optional[str]:
     email, dev_token = get_email_and_token(proxies)
     if not email or not dev_token:
         return None
-    log.info(f"Mail.tm email acquired: {email}")
+    log.info(f"Tempmail.lol email acquired: {email}")
 
     def _get_otp(email_addr: str) -> str:
         return get_oai_code(dev_token, email_addr, proxies)
@@ -1587,7 +1759,7 @@ def _do_one_registration(
         log.info(f"[{idx}/{total}] {email_addr} (Outlook IMAP)")
         log.info(f"{'─'*50}")
     else:
-        email_addr = None  # Will be generated by Mail.tm
+        email_addr = None  # Will be generated by Tempmail.lol
 
     used = set()
     start_t = time.time()
@@ -1603,15 +1775,15 @@ def _do_one_registration(
                     mail_account=mail_account, domain_mail=domain_mail,
                 )
             else:
-                # Mail.tm mode: get a new disposable email
+                # Tempmail.lol mode: get a new disposable email
                 email, dev_token = get_email_and_token(proxies)
                 if not email or not dev_token:
-                    raise RuntimeError("Failed to get Mail.tm email")
+                    raise RuntimeError("Failed to get Tempmail.lol email")
                 email_addr = email
 
                 if idx == 1 or not hasattr(_do_one_registration, "_logged_email"):
                     log.info(f"\n{'─'*50}")
-                    log.info(f"[{idx}/{total}] {email_addr} (Mail.tm)")
+                    log.info(f"[{idx}/{total}] {email_addr} (Tempmail.lol)")
                     log.info(f"{'─'*50}")
                     _do_one_registration._logged_email = True
 
@@ -1687,7 +1859,7 @@ def run_auto_register_cli(*, proxy: Optional[str], once: bool, sleep_min: int, s
                                          tokens_dir, mail_account=acct, domain_mail=domain_mail)
             log.info(f"Batch #{count} complete: {stats['ok']} ok, {stats['fail']} fail")
         else:
-            # Mail.tm mode: single registration per cycle
+            # Tempmail.lol mode: single registration per cycle
             stats = {"ok": 0, "fail": 0}
             lock = threading.Lock()
             _do_one_registration(1, 1, proxy or "", stats, lock, tokens_dir)

@@ -190,6 +190,29 @@ class CodexRegisterServiceTests(unittest.TestCase):
         self.assertEqual(to_add, {3})
         self.assertEqual(to_remove, {1})
 
+    def test_proxy_url_from_proxies_prefers_https(self):
+        self.assertEqual(
+            service._proxy_url_from_proxies({"http": "http://a", "https": "http://b"}),
+            "http://b",
+        )
+
+    def test_build_tempmail_service_reads_env_overrides(self):
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "CODEX_TEMPMAIL_BASE_URL": "https://tm.example/v2",
+                "CODEX_TEMPMAIL_TIMEOUT": "45",
+                "CODEX_TEMPMAIL_MAX_RETRIES": "6",
+            },
+            clear=False,
+        ):
+            tempmail = service._build_tempmail_service({"https": "http://proxy:7890"})
+
+        self.assertEqual(tempmail.base_url, "https://tm.example/v2")
+        self.assertEqual(tempmail.timeout, 45)
+        self.assertEqual(tempmail.max_retries, 6)
+        self.assertEqual(tempmail.proxy_url, "http://proxy:7890")
+
     def test_bind_groups_updates_by_diff_without_wholesale_delete(self):
         cur = _FakeCursor(rows=[(1, 1), (2, 5)])
 
