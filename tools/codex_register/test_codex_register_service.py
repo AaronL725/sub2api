@@ -140,6 +140,47 @@ class CodexRegisterServiceTests(unittest.TestCase):
             )
         )
 
+    def test_build_credentials_preserves_new_openai_auth_fields(self):
+        credentials = service.build_credentials(
+            {"email": "old@example.com"},
+            {
+                "email": "new@example.com",
+                "account_id": "acct_123",
+                "access_token": "at",
+                "refresh_token": "rt",
+                "id_token": "id",
+                "client_id": "client_123",
+                "workspace_id": "ws_123",
+                "session_token": "sess_123",
+                "registration_mode": "login",
+                "expired": "2026-03-20T12:00:00Z",
+            },
+        )
+
+        self.assertEqual(credentials["email"], "new@example.com")
+        self.assertEqual(credentials["account_id"], "acct_123")
+        self.assertEqual(credentials["chatgpt_account_id"], "acct_123")
+        self.assertEqual(credentials["client_id"], "client_123")
+        self.assertEqual(credentials["organization_id"], "ws_123")
+        self.assertEqual(credentials["workspace_id"], "ws_123")
+        self.assertEqual(credentials["session_token"], "sess_123")
+        self.assertEqual(credentials["codex_register_source"], "login")
+        self.assertEqual(credentials["expires_at"], "2026-03-20T12:00:00Z")
+        self.assertEqual(credentials["source"], "codex-auto-register")
+
+    def test_build_extra_records_registration_flow_metadata(self):
+        extra = service.build_extra(
+            {},
+            {
+                "workspace_id": "ws_456",
+                "registration_mode": "register",
+            },
+        )
+
+        self.assertTrue(extra["codex_auto_register"])
+        self.assertEqual(extra["codex_auto_register_flow"], "register")
+        self.assertEqual(extra["codex_auto_register_workspace_id"], "ws_456")
+
     def test_compute_group_binding_changes_returns_add_remove_sets(self):
         to_add, to_remove = service.compute_group_binding_changes(
             current_group_ids={1, 2},

@@ -1193,7 +1193,7 @@ def submit_callback_url(*, callback_url: str, expected_state: str, code_verifier
     now_rfc3339 = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     return json.dumps({
         "id_token": id_token, "access_token": access_token, "refresh_token": refresh_token,
-        "account_id": account_id, "last_refresh": now_rfc3339, "email": email,
+        "account_id": account_id, "client_id": CLIENT_ID, "last_refresh": now_rfc3339, "email": email,
         "type": "codex", "expired": expired_rfc3339,
     }, ensure_ascii=False, separators=(",", ":"))
 
@@ -1244,14 +1244,20 @@ class APISession:
         return self._session.cookies.get(name)
 
     def follow_redirects(self, url: str, max_hops: int = 12) -> Optional[str]:
+        current_url = url
         for _ in range(max_hops):
-            resp = self._session.get(url, allow_redirects=False, timeout=30)
+            resp = self._session.get(current_url, allow_redirects=False, timeout=30)
             location = resp.headers.get("Location")
             if not location:
                 return None
-            if "localhost" in location and "/auth/callback" in location:
-                return location
-            url = location
+            next_url = urllib.parse.urljoin(current_url, location)
+            parsed = urllib.parse.urlparse(next_url)
+            query = urllib.parse.parse_qs(parsed.query)
+            if query.get("code") and query.get("state"):
+                return next_url
+            if "localhost" in next_url and "/auth/callback" in next_url:
+                return next_url
+            current_url = next_url
         return None
 
     def close(self) -> None:
@@ -1491,6 +1497,7 @@ def register_account(
         claims = _jwt_claims_no_verify(token_data.get("id_token", ""))
         auth_claims = claims.get("https://api.openai.com/auth", {})
         now = int(time.time())
+        session_token = http.get_cookie("__Secure-next-auth.session-token") or ""
         result = {
             "email": email_addr,
             "type": "codex",
@@ -1499,10 +1506,16 @@ def register_account(
             "refresh_token": token_data.get("refresh_token", ""),
             "id_token": token_data.get("id_token", ""),
             "account_id": auth_claims.get("chatgpt_account_id", ""),
+            "client_id": CLIENT_ID,
+            "workspace_id": workspace_id,
+            "organization_id": workspace_id,
+            "registration_mode": "login" if is_existing else "register",
             "expired": time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                      time.gmtime(now + int(token_data.get("expires_in", 0)))),
             "last_refresh": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
         }
+        if session_token:
+            result["session_token"] = session_token
         if password:
             result["password"] = password
         log.info("  Registration successful!")
@@ -1818,6 +1831,8 @@ def get_existing_account(cur, email: str, account_id: str):
     if account_id:
         conditions.append("credentials ->> 'account_id' = %s")
         params.append(account_id)
+        conditions.append("credentials ->> 'chatgpt_account_id' = %s")
+        params.append(account_id)
     if not conditions:
         return None
     cur.execute(
@@ -1867,14 +1882,31 @@ def build_credentials(existing: JSONDict, token_info: JSONDict) -> JSONDict:
     credentials["access_token"] = token_info.get("access_token") or credentials.get("access_token") or ""
     credentials["refresh_token"] = token_info.get("refresh_token") or credentials.get("refresh_token") or ""
     credentials["id_token"] = token_info.get("id_token") or credentials.get("id_token") or ""
+    credentials["client_id"] = token_info.get("client_id") or credentials.get("client_id") or CLIENT_ID
     if token_info.get("email"):
         credentials["email"] = token_info.get("email")
     if token_info.get("account_id"):
         credentials["account_id"] = token_info.get("account_id")
         credentials["chatgpt_account_id"] = token_info.get("account_id")
+    workspace_id = (
+        token_info.get("organization_id")
+        or token_info.get("workspace_id")
+        or credentials.get("organization_id")
+        or credentials.get("workspace_id")
+        or ""
+    )
+    if workspace_id:
+        credentials["organization_id"] = workspace_id
+        credentials["workspace_id"] = workspace_id
+    session_token = token_info.get("session_token") or credentials.get("session_token") or ""
+    if session_token:
+        credentials["session_token"] = session_token
     if token_info.get("expired") is not None:
         credentials["expires_at"] = token_info.get("expired")
     credentials["source"] = "codex-auto-register"
+    registration_mode = token_info.get("registration_mode") or credentials.get("codex_register_source") or ""
+    if registration_mode:
+        credentials["codex_register_source"] = registration_mode
     credentials["model_mapping"] = build_model_mapping()
     if token_info.get("auth_file"):
         credentials["codex_auth_file"] = token_info.get("auth_file")
@@ -1885,6 +1917,12 @@ def build_extra(existing: JSONDict, token_info: JSONDict) -> JSONDict:
     extra = dict(existing)
     extra["codex_auto_register"] = True
     extra["codex_auto_register_model_mapping"] = build_model_mapping()
+    registration_mode = token_info.get("registration_mode") or extra.get("codex_auto_register_flow") or ""
+    if registration_mode:
+        extra["codex_auto_register_flow"] = registration_mode
+    workspace_id = token_info.get("organization_id") or token_info.get("workspace_id") or ""
+    if workspace_id:
+        extra["codex_auto_register_workspace_id"] = workspace_id
     if token_info.get("auth_file"):
         extra["codex_auth_file"] = token_info.get("auth_file")
     return extra
